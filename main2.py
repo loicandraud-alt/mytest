@@ -27,53 +27,6 @@ def filled_area_touche_bas(filled_area):
     return np.any(filled_area[-1] == 255)
 
 
-def checkContoursIndide2(contours):
-    """Log l'appartenance d'un contour à un autre dans la même liste.
-
-    Pour chaque contour, on tente de récupérer un point représentatif (le
-    centroïde si possible) et on vérifie si ce point est situé à l'intérieur
-    d'un ou plusieurs autres contours de la liste. Les informations sont
-    affichées via ``print`` et la structure de résultat est retournée pour un
-    usage éventuel ultérieur.
-    """
-
-    inclusion_map = []
-
-    for idx, contour in enumerate(contours):
-        if contour is None or len(contour) == 0:
-            inclusion_map.append((idx, []))
-            print(f"Contour {idx} est vide ou non défini.")
-            continue
-
-        # Calcul d'un point de test : centroïde si disponible, sinon premier point
-        moments = cv2.moments(contour)
-        if moments["m00"] != 0:
-            point = (
-                int(moments["m10"] / moments["m00"]),
-                int(moments["m01"] / moments["m00"]),
-            )
-        else:
-            point = tuple(contour[0][0])
-
-        parents = []
-        for other_idx, other in enumerate(contours):
-            if other_idx == idx or other is None or len(other) == 0:
-                continue
-
-            # pointPolygonTest retourne > 0 si point à l'intérieur, 0 sur le bord
-            # et < 0 si à l'extérieur. On accepte l'intérieur ou sur le bord.
-            if cv2.pointPolygonTest(other, point, False) >= 0:
-                parents.append(other_idx)
-
-        if parents:
-            print(f"Contour {idx} est entouré par les contours {parents}.")
-        else:
-            print(f"Contour {idx} n'est entouré par aucun autre contour.")
-
-        inclusion_map.append((idx, parents))
-
-    return inclusion_map
-
 def floodfill_extract_contours(image_gray):
     """
     Utilise floodFill pour détecter chaque zone noire connectée,
@@ -175,7 +128,20 @@ def findAngle(cnt):
 
 
 # La fonction rotate_texture a été supprimée car elle n'est plus nécessaire.
+def checkContoursIndide(contours):
+    for i, contour in enumerate(contours):
+        parent_index = hierarchy[0][i][3]  # On récupère l'indice du parent
 
+        # Si le contour a un parent (l'indice n'est pas -1)
+        if parent_index != -1:
+            # C'est un contour "enfant"
+            parent_contour = contours[parent_index]
+
+            # Dessiner pour visualiser
+            cv2.drawContours(image_resultat, [contour], -1, (0, 255, 0), 2)  # Enfant en vert
+            cv2.drawContours(image_resultat, [parent_contour], -1, (0, 0, 255), 2)  # Parent en rouge
+
+            print(f"Le contour {i} est à l'intérieur du contour {parent_index}")
 def drawFile(path, image, edges, dilatation, mode):
     kernel = np.ones((dilatation, dilatation), np.uint8)
     myedgesdilatated = cv2.dilate(edges, kernel, iterations=1)
@@ -187,15 +153,15 @@ def drawFile(path, image, edges, dilatation, mode):
 
     # Charger et préparer les textures
     textures_files = {
-        "brique": cv2.resize(cv2.imread("../textures/brique.jpg"), (0, 0), fx=0.5, fy=0.5),
-        "brique2": cv2.resize(cv2.imread("../textures/brique2.jpg"), (0, 0), fx=0.2, fy=0.2),
-        "bois1": cv2.resize(cv2.imread("../textures/bois1.jpg"), (0, 0), fx=0.5, fy=0.5),
-        "bois2": cv2.resize(cv2.imread("../textures/bois2.jpg"), (0, 0), fx=0.2, fy=0.2),
-        "pierre": cv2.resize(cv2.imread("../textures/pierre.jpg"), (0, 0), fx=0.1, fy=0.1),
-        "enduit1": cv2.resize(cv2.imread("../textures/enduit1.jpg"), (0, 0), fx=0.1, fy=0.1),
+        "brique": cv2.resize(cv2.imread("../webercolor/textures/brique.jpg"), (0, 0), fx=0.5, fy=0.5),
+        "brique2": cv2.resize(cv2.imread("../webercolor/textures/brique2.jpg"), (0, 0), fx=0.2, fy=0.2),
+        "bois1": cv2.resize(cv2.imread("../webercolor/textures/bois1.jpg"), (0, 0), fx=0.5, fy=0.5),
+        "bois2": cv2.resize(cv2.imread("../webercolor/textures/bois2.jpg"), (0, 0), fx=0.2, fy=0.2),
+        "pierre": cv2.resize(cv2.imread("../webercolor/textures/pierre.jpg"), (0, 0), fx=0.1, fy=0.1),
+        "enduit1": cv2.resize(cv2.imread("../webercolor/textures/enduit1.jpg"), (0, 0), fx=0.05, fy=0.05),
     }
     textures = list(textures_files.values())
-    checkContoursIndide2(toto)
+    #checkContoursIndide(toto)
     for cnt in toto:
         # ---- NOUVELLE LOGIQUE DE TEXTURAGE ----
 

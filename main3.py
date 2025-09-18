@@ -27,53 +27,6 @@ def filled_area_touche_bas(filled_area):
     return np.any(filled_area[-1] == 255)
 
 
-def checkContoursIndide2(contours):
-    """Log l'appartenance d'un contour à un autre dans la même liste.
-
-    Pour chaque contour, on tente de récupérer un point représentatif (le
-    centroïde si possible) et on vérifie si ce point est situé à l'intérieur
-    d'un ou plusieurs autres contours de la liste. Les informations sont
-    affichées via ``print`` et la structure de résultat est retournée pour un
-    usage éventuel ultérieur.
-    """
-
-    inclusion_map = []
-
-    for idx, contour in enumerate(contours):
-        if contour is None or len(contour) == 0:
-            inclusion_map.append((idx, []))
-            print(f"Contour {idx} est vide ou non défini.")
-            continue
-
-        # Calcul d'un point de test : centroïde si disponible, sinon premier point
-        moments = cv2.moments(contour)
-        if moments["m00"] != 0:
-            point = (
-                int(moments["m10"] / moments["m00"]),
-                int(moments["m01"] / moments["m00"]),
-            )
-        else:
-            point = tuple(contour[0][0])
-
-        parents = []
-        for other_idx, other in enumerate(contours):
-            if other_idx == idx or other is None or len(other) == 0:
-                continue
-
-            # pointPolygonTest retourne > 0 si point à l'intérieur, 0 sur le bord
-            # et < 0 si à l'extérieur. On accepte l'intérieur ou sur le bord.
-            if cv2.pointPolygonTest(other, point, False) >= 0:
-                parents.append(other_idx)
-
-        if parents:
-            print(f"Contour {idx} est entouré par les contours {parents}.")
-        else:
-            print(f"Contour {idx} n'est entouré par aucun autre contour.")
-
-        inclusion_map.append((idx, parents))
-
-    return inclusion_map
-
 def floodfill_extract_contours(image_gray):
     """
     Utilise floodFill pour détecter chaque zone noire connectée,
@@ -171,10 +124,41 @@ def findAngle(cnt):
         if length > max_len:
             max_len = length
             angle_deg = math.degrees(math.atan2(dy, dx))
-    return -angle_deg
+    angle_deg = - angle_deg % 180
+    #Vertical walls stay vertical despite perspspective
+    if angle_deg >75 and angle_deg <105:
+        angle_deg = angle_deg - 90
+    return angle_deg
 
+def findAngle2(cnt):
+    """
+    Calcule l'angle du segment le plus long d'un contour après approximation.
+    """
+    epsilon = 0.02 * cv2.arcLength(cnt, True)
+    approx = cv2.approxPolyDP(cnt, epsilon, True)
 
-# La fonction rotate_texture a été supprimée car elle n'est plus nécessaire.
+    if len(approx) < 2:
+        return 0
+
+    segments = []
+    for i in range(len(approx)):
+        pt1 = approx[i][0]
+        pt2 = approx[(i + 1) % len(approx)][0]
+        dx = pt2[0] - pt1[0]
+        dy = pt2[1] - pt1[1]
+        length = math.hypot(dx, dy)
+        segments.append((length, dx, dy))
+
+    segments.sort(key=lambda seg: seg[0], reverse=True)
+
+    for length, dx, dy in segments:
+        # To improve
+        if abs(dx) < 50:
+            continue
+        angle_deg = math.degrees(math.atan2(dy, dx)) % 180
+        return angle_deg
+
+    return 0
 
 def drawFile(path, image, edges, dilatation, mode):
     kernel = np.ones((dilatation, dilatation), np.uint8)
@@ -187,24 +171,25 @@ def drawFile(path, image, edges, dilatation, mode):
 
     # Charger et préparer les textures
     textures_files = {
-        "brique": cv2.resize(cv2.imread("../textures/brique.jpg"), (0, 0), fx=0.5, fy=0.5),
-        "brique2": cv2.resize(cv2.imread("../textures/brique2.jpg"), (0, 0), fx=0.2, fy=0.2),
-        "bois1": cv2.resize(cv2.imread("../textures/bois1.jpg"), (0, 0), fx=0.5, fy=0.5),
-        "bois2": cv2.resize(cv2.imread("../textures/bois2.jpg"), (0, 0), fx=0.2, fy=0.2),
-        "pierre": cv2.resize(cv2.imread("../textures/pierre.jpg"), (0, 0), fx=0.1, fy=0.1),
-        "enduit1": cv2.resize(cv2.imread("../textures/enduit1.jpg"), (0, 0), fx=0.1, fy=0.1),
+        "brique": cv2.resize(cv2.imread("../webercolor/textures/brique.jpg"), (0, 0), fx=0.5, fy=0.5),
+        "brique2": cv2.resize(cv2.imread("../webercolor/textures/brique2.jpg"), (0, 0), fx=0.2, fy=0.2),
+        "brique3": cv2.resize(cv2.imread("../webercolor/textures/brique3.jpg"), (0, 0), fx=0.2, fy=0.2),
+        "bois1": cv2.resize(cv2.imread("../webercolor/textures/bois1.jpg"), (0, 0), fx=0.5, fy=0.5),
+        "bois2": cv2.resize(cv2.imread("../webercolor/textures/bois2.jpg"), (0, 0), fx=0.2, fy=0.2),
+        "pierre": cv2.resize(cv2.imread("../webercolor/textures/pierre.jpg"), (0, 0), fx=0.1, fy=0.1),
+        "enduit1": cv2.resize(cv2.imread("../webercolor/textures/enduit1.jpg"), (0, 0), fx=0.05, fy=0.05),
     }
     textures = list(textures_files.values())
-    checkContoursIndide2(toto)
+    #checkContoursIndide(toto)
     for cnt in toto:
         # ---- NOUVELLE LOGIQUE DE TEXTURAGE ----
 
         # 1. Obtenir l'angle et prendre son opposé pour la correction
-        angle = -findAngle(cnt)
+        angle = findAngle2(cnt)
 
         # 2. Choisir une texture (on ne la tourne pas ici)
-        chosen_texture = random.choice(textures)
-
+        #chosen_texture = random.choice(textures)
+        chosen_texture = textures[2]
         # 3. Préparer la zone de destination
         dilatatedcnt = dilate_contour(cnt, img.shape, 3)
         x, y, w, h = cv2.boundingRect(dilatatedcnt)
