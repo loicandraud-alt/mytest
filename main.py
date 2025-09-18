@@ -210,13 +210,17 @@ def findAngle2(cnt):
 
 def findPointsFromContour(cnt):
     """
-    Calcule l'angle du segment le plus long d'un contour après approximation.
+    Calcule les deux segments les plus longs non verticaux d'un contour.
+
+    Returns:
+        Tuple des quatre points constituant les deux segments ou ``None`` si
+        aucun couple valide n'est trouvé.
     """
     epsilon = 0.02 * cv2.arcLength(cnt, True)
     approx = cv2.approxPolyDP(cnt, epsilon, True)
 
     if len(approx) < 2:
-        return 0
+        return None
 
     segments = []
     for i in range(len(approx)):
@@ -229,25 +233,23 @@ def findPointsFromContour(cnt):
 
     segments.sort(key=lambda seg: seg[0], reverse=True)
 
-    angle_deg1 = -10
-    angle_deg2 = -10
-
+    outpt11 = outpt12 = outpt21 = outpt22 = None
 
     for length, dx, dy, pt1, pt2 in segments:
         # To improve, if vertical lnes
         if abs(dx) < 50:
             continue
-        if angle_deg1 < 0:
-            angle_deg1 = math.degrees(math.atan2(dy, dx)) % 180
-            outpt11 =  pt1
+        if outpt11 is None:
+            outpt11 = pt1
             outpt12 = pt2
-        else:
-            if angle_deg2 < 0:
-                angle_deg2 = math.degrees(math.atan2(dy, dx)) % 180
-                outpt21 = pt1
-                outpt22 = pt2
-
-
+        elif outpt21 is None:
+            outpt21 = pt1
+            outpt22 = pt2
+            break
+    """
+    if None in (outpt11, outpt12, outpt21, outpt22):
+        return None
+    """
     return outpt11, outpt12, outpt21, outpt22
 
 Point = Tuple[float, float]
@@ -367,10 +369,11 @@ def drawFile(path, image, edges, dilatation, mode):
     kernel = np.ones((dilatation, dilatation), np.uint8)
     myedgesdilatated = cv2.dilate(edges, kernel, iterations=1)
     cv2.imwrite(path + "_result_edges.jpg", myedgesdilatated)
-    color_zones = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
+    color_zones = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
 
     toto = floodfill_extract_contours(myedgesdilatated)
     final_result = np.zeros((edges.shape[0], edges.shape[1], 3), dtype=np.uint8)
+    background_with_quads = image.copy()
 
     # Charger et préparer les textures
     textures_files = {
@@ -390,14 +393,26 @@ def drawFile(path, image, edges, dilatation, mode):
 
         # 1. Obtenir l'angle et prendre son opposé pour la correction
         angle = findAngle2(cnt)
-        pt11, pt12, pt21, pt22 = findPointsFromContour(cnt)
+        points = findPointsFromContour(cnt)
+        quadrilateral_points = None
+        if points is not None:
+            pt11, pt12, pt21, pt22 = points
+            try:
+                line1 = ((float(pt11[0]), float(pt11[1])), (float(pt12[0]), float(pt12[1])))
+                line2 = ((float(pt21[0]), float(pt21[1])), (float(pt22[0]), float(pt22[1])))
+                quadrilateral_points = quadrilateral_from_lines(line1, line2)
+            except ValueError:
+                quadrilateral_points = None
 
-        quadrilateral_from_lines()
+        if quadrilateral_points:
+            quad_array = np.array([[int(round(x)), int(round(y))] for x, y in quadrilateral_points], dtype=np.int32)
+            cv2.polylines(background_with_quads, [quad_array], isClosed=True, color=(0, 0, 255), thickness=3)
+
         # 2. Choisir une texture (on ne la tourne pas ici)
         chosen_texture = random.choice(textures)
         #chosen_texture = textures[2]
         # 3. Préparer la zone de destination
-        dilatatedcnt = dilate_contour(cnt, img.shape, 3)
+        dilatatedcnt = dilate_contour(cnt, image.shape, 3)
         x, y, w, h = cv2.boundingRect(dilatatedcnt)
 
         # 4. Créer la transformation inverse pour le pavage rotatif
@@ -428,8 +443,9 @@ def drawFile(path, image, edges, dilatation, mode):
         roi_bg_masked = cv2.bitwise_and(roi_bg, roi_bg, mask=cv2.bitwise_not(mask))
         final_result[y:y + h, x:x + w] = cv2.add(roi_bg_masked, textured_region)
 
-    final_composite = mergeimages(img, final_result)
+    final_composite = mergeimages(image, final_result)
     cv2.imwrite(path + "_combined.jpg", final_composite)
+    cv2.imwrite(path + "_background_quadrilaterals.jpg", background_with_quads)
 
     # Dessin des zones colorées pour visualisation
     for cnt in toto:
