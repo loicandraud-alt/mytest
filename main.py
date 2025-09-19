@@ -9,6 +9,8 @@ from PIL import Image, ImageFilter
 
 from webercolor.linequedrilareral import quadrilateral_from_lines
 from typing import List, Tuple
+from webercolor.linequedrilareral import quadrilateral_from_lines
+from wallquad import estimate_wall_quadrilateral
 
 def maxlength(approx):
     max_len = 0.0
@@ -237,7 +239,7 @@ def findPointsFromContour(cnt):
 
     for length, dx, dy, pt1, pt2 in segments:
         # To improve, if vertical lnes
-        if abs(dx) < 50:
+        if abs(dx) < 50 : #and abs(dy > 30):
             continue
         if outpt11 is None:
             outpt11 = pt1
@@ -246,10 +248,8 @@ def findPointsFromContour(cnt):
             outpt21 = pt1
             outpt22 = pt2
             break
-    """
-    if None in (outpt11, outpt12, outpt21, outpt22):
+    if any(pt is None for pt in (outpt11, outpt12, outpt21, outpt22)):
         return None
-    """
     return outpt11, outpt12, outpt21, outpt22
 
 Point = Tuple[float, float]
@@ -374,6 +374,7 @@ def drawFile(path, image, edges, dilatation, mode):
     toto = floodfill_extract_contours(myedgesdilatated)
     final_result = np.zeros((edges.shape[0], edges.shape[1], 3), dtype=np.uint8)
     background_with_quads = image.copy()
+    background_with_wallquad_quads = image.copy()
 
     # Charger et préparer les textures
     textures_files = {
@@ -407,6 +408,26 @@ def drawFile(path, image, edges, dilatation, mode):
         if quadrilateral_points:
             quad_array = np.array([[int(round(x)), int(round(y))] for x, y in quadrilateral_points], dtype=np.int32)
             cv2.polylines(background_with_quads, [quad_array], isClosed=True, color=(0, 0, 255), thickness=3)
+
+        wall_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        cv2.drawContours(wall_mask, [cnt], -1, 255, thickness=cv2.FILLED)
+        try:
+            wall_quad = estimate_wall_quadrilateral(wall_mask, image=image)
+        except ValueError:
+            wall_quad = None
+        except Exception as exc:
+            print(f"Erreur lors de l'estimation du quadrilatère avec wallquad: {exc}")
+            wall_quad = None
+
+        if wall_quad is not None:
+            wall_quad_int = wall_quad.reshape((-1, 1, 2)).astype(np.int32)
+            cv2.polylines(
+                background_with_wallquad_quads,
+                [wall_quad_int],
+                isClosed=True,
+                color=(255, 0, 0),
+                thickness=3,
+            )
 
         # 2. Choisir une texture (on ne la tourne pas ici)
         chosen_texture = random.choice(textures)
@@ -446,6 +467,7 @@ def drawFile(path, image, edges, dilatation, mode):
     final_composite = mergeimages(image, final_result)
     cv2.imwrite(path + "_combined.jpg", final_composite)
     cv2.imwrite(path + "_background_quadrilaterals.jpg", background_with_quads)
+    cv2.imwrite(path + "_background_wallquad_quadrilaterals.jpg", background_with_wallquad_quads)
 
     # Dessin des zones colorées pour visualisation
     for cnt in toto:
@@ -456,7 +478,7 @@ def drawFile(path, image, edges, dilatation, mode):
 
 
 # --- SCRIPT PRINCIPAL ---
-path = 'building5.jpg'
+path = 'building7.jpg'
 img = cv2.imread(path)
 if img is None:
     print(f"Erreur: Impossible de charger l'image depuis {path}")

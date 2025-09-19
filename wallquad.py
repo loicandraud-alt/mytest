@@ -205,6 +205,28 @@ def _min_area_rect(points: np.ndarray) -> np.ndarray:
     return _order_corners(box)
 
 
+def _quadrilateral_from_hull(points: np.ndarray) -> Optional[np.ndarray]:
+    """Try to approximate the convex hull by a 4-vertex polygon."""
+
+    if points.ndim != 2 or points.shape[1] != 2:
+        raise ValueError("Les points doivent être fournis en 2D (N, 2).")
+
+    contour = points.reshape((-1, 1, 2)).astype(np.float32)
+    perimeter = cv2.arcLength(contour, True)
+    if perimeter <= 1e-6:
+        return None
+
+    # Explore several approximation tolerances, from detailed to coarse. We
+    # keep the first quadrilateral found, which favours following the hull
+    # geometry instead of collapsing to a rectangle.
+    for epsilon_ratio in np.linspace(0.01, 0.08, num=8):
+        approx = cv2.approxPolyDP(contour, epsilon_ratio * perimeter, True)
+        if len(approx) == 4:
+            return _order_corners(approx.reshape(4, 2))
+
+    return None
+
+
 def _save_overlay_image(
     image: np.ndarray,
     quad: np.ndarray,
@@ -348,8 +370,13 @@ def estimate_wall_quadrilateral(
         return quad
 
     if len(clusters) < 2:
-        quad = _min_area_rect(hull_points)
-        return _finalize_result(quad, mode="min_area_rect")
+        quad = _quadrilateral_from_hull(hull_points)
+        if quad is None:
+            quad = _min_area_rect(hull_points)
+            mode = "min_area_rect"
+        else:
+            mode = "hull_approx"
+        return _finalize_result(quad, mode=mode)
 
     # Select the two clusters with most lines.
     clusters = sorted(clusters, key=lambda c: len(c.lines), reverse=True)[:2]
@@ -360,10 +387,14 @@ def estimate_wall_quadrilateral(
     if angle_diff > math.pi / 2:
         angle_diff = math.pi - angle_diff
     if angle_diff < math.radians(10):
-        quad = _min_area_rect(hull_points)
+        quad = _quadrilateral_from_hull(hull_points)
+        mode = "hull_approx"
+        if quad is None:
+            quad = _min_area_rect(hull_points)
+            mode = "min_area_rect"
         if return_debug:
             debug_data["angle_diff"] = angle_diff
-        return _finalize_result(quad, mode="min_area_rect")
+        return _finalize_result(quad, mode=mode)
 
     normal1, offset1_min, offset1_max = _support_lines(hull_points, angle1)
     normal2, offset2_min, offset2_max = _support_lines(hull_points, angle2)
@@ -374,8 +405,12 @@ def estimate_wall_quadrilateral(
         p3 = _intersect(normal1, offset1_max, normal2, offset2_max)
         p4 = _intersect(normal1, offset1_max, normal2, offset2_min)
     except ValueError:
-        quad = _min_area_rect(hull_points)
-        return _finalize_result(quad, mode="min_area_rect")
+        quad = _quadrilateral_from_hull(hull_points)
+        mode = "hull_approx"
+        if quad is None:
+            quad = _min_area_rect(hull_points)
+            mode = "min_area_rect"
+        return _finalize_result(quad, mode=mode)
 
     corners = np.stack([p1, p2, p3, p4]).astype(np.float32)
     ordered = _order_corners(corners)
