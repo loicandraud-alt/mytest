@@ -14,6 +14,8 @@ def project_texture(
     background: np.ndarray,
     texture: np.ndarray,
     dst_points: PointList,
+    *,
+    clip_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     """Project ``texture`` on to ``background`` inside the quad ``dst_points``.
 
@@ -53,6 +55,16 @@ def project_texture(
 
     mask = np.ones((h, w), dtype=np.uint8) * 255
     warped_mask = cv2.warpPerspective(mask, homography, (background.shape[1], background.shape[0]))
+
+    if clip_mask is not None:
+        if clip_mask.shape != background.shape[:2]:
+            raise ValueError("clip_mask must have the same height and width as background")
+        if clip_mask.dtype != np.uint8:
+            clip_mask_u8 = (clip_mask > 0).astype(np.uint8) * 255
+        else:
+            clip_mask_u8 = clip_mask
+        warped_mask = cv2.bitwise_and(warped_mask, clip_mask_u8)
+        warped = cv2.bitwise_and(warped, warped, mask=warped_mask)
 
     background_masked = cv2.bitwise_and(background, background, mask=cv2.bitwise_not(warped_mask))
     return cv2.add(background_masked, warped)

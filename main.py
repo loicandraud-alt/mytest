@@ -11,6 +11,7 @@ from webercolor.linequedrilareral import quadrilateral_from_lines
 from typing import List, Tuple
 from webercolor.linequedrilareral import quadrilateral_from_lines
 from wallquad import estimate_wall_quadrilateral
+from perpspectiveoverlay import project_texture
 
 def maxlength(approx):
     max_len = 0.0
@@ -139,18 +140,41 @@ def mergeimages(image1, image2):
     textured_cleaned = cv2.bitwise_and(image2, image2, mask=texture_mask)
     return cv2.bitwise_or(background_cleaned, textured_cleaned)
 
+def mergeimages(image1, image2):
+        gray_result = cv2.cvtColor(image2, cv2.COLOR_BGR2GRAY)
+        _, texture_mask = cv2.threshold(gray_result, 1, 255, cv2.THRESH_BINARY)
+        texture_mask_inv = cv2.bitwise_not(texture_mask)
+        background_cleaned = cv2.bitwise_and(image1, image1, mask=texture_mask_inv)
+        textured_cleaned = cv2.bitwise_and(image2, image2, mask=texture_mask)
+        return cv2.bitwise_or(background_cleaned, textured_cleaned)
+
+def tile_texture(texture: np.ndarray, target_width: int, target_height: int) -> np.ndarray:
+        """Repeat ``texture`` to cover a rectangle of ``target_width`` × ``target_height``."""
+
+        if target_width <= 0 or target_height <= 0:
+            raise ValueError("Target dimensions must be strictly positive to tile a texture.")
+
+        tex_height, tex_width = texture.shape[:2]
+        if tex_width == 0 or tex_height == 0:
+            raise ValueError("Texture must have non-zero dimensions.")
+
+        repeat_x = max(1, math.ceil(target_width / tex_width))
+        repeat_y = max(1, math.ceil(target_height / tex_height))
+        tiled = np.tile(texture, (repeat_y, repeat_x, 1))
+        return tiled[:target_height, :target_width]
 
 def boostimagegray(img):
-    alpha = 1
-    beta = 0
-    adjusted = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
-    hsv = cv2.cvtColor(adjusted, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(hsv)
-    s = cv2.multiply(s, 1.5)
-    s = np.clip(s, 0, 255).astype(np.uint8)
-    hsv_boosted = cv2.merge((h, s, v))
-    color_boosted = cv2.cvtColor(hsv_boosted, cv2.COLOR_HSV2BGR)
-    return cv2.cvtColor(color_boosted, cv2.COLOR_BGR2GRAY)
+        alpha = 1
+        beta = 0
+        adjusted = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
+        hsv = cv2.cvtColor(adjusted, cv2.COLOR_BGR2HSV)
+
+        h, s, v = cv2.split(hsv)
+        s = cv2.multiply(s, 1.5)
+        s = np.clip(s, 0, 255).astype(np.uint8)
+        hsv_boosted = cv2.merge((h, s, v))
+        color_boosted = cv2.cvtColor(hsv_boosted, cv2.COLOR_HSV2BGR)
+        return cv2.cvtColor(color_boosted, cv2.COLOR_BGR2GRAY)
 
 
 def findAngle(cnt):
@@ -372,7 +396,7 @@ def drawFile(path, image, edges, dilatation, mode):
     color_zones = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
 
     toto = floodfill_extract_contours(myedgesdilatated)
-    final_result = np.zeros((edges.shape[0], edges.shape[1], 3), dtype=np.uint8)
+    textured_image = image.copy()
     background_with_quads = image.copy()
     background_with_wallquad_quads = image.copy()
 
@@ -388,11 +412,13 @@ def drawFile(path, image, edges, dilatation, mode):
     }
     textures = list(textures_files.values())
     checkContoursIndide(toto)
+    done = 0
 
     for cnt in toto:
-        # ---- NOUVELLE LOGIQUE DE TEXTURAGE ----
-
-        # 1. Obtenir l'angle et prendre son opposé pour la correction
+        if done != 0:
+            continue
+        done = done + 1
+        #1. Obtenir l'angle et prendre son opposé pour la correction␊
         angle = findAngle2(cnt)
         points = findPointsFromContour(cnt)
         quadrilateral_points = None
@@ -404,68 +430,84 @@ def drawFile(path, image, edges, dilatation, mode):
                 quadrilateral_points = quadrilateral_from_lines(line1, line2)
             except ValueError:
                 quadrilateral_points = None
+            if quadrilateral_points:
+                quad_array = np.array([[int(round(x)), int(round(y))] for x, y in quadrilateral_points],          dtype=np.int32)
+                cv2.polylines(background_with_quads, [quad_array], isClosed=True, color=(0, 0, 255), thickness=3)
+            wall_mask = np.zeros(image.shape[:2], dtype=np.uint8)
+            cv2.drawContours(wall_mask, [cnt], -1, 255, thickness=cv2.FILLED)
+            try:
+                wall_quad = estimate_wall_quadrilateral(wall_mask, image=image)
+            except ValueError:
+                wall_quad = None
+            except Exception as exc:
+                print(f"Erreur lors de l'estimation du quadrilatère avec wallquad: {exc}")
+                wall_quad = None
 
-        if quadrilateral_points:
-            quad_array = np.array([[int(round(x)), int(round(y))] for x, y in quadrilateral_points], dtype=np.int32)
-            cv2.polylines(background_with_quads, [quad_array], isClosed=True, color=(0, 0, 255), thickness=3)
+            if wall_quad is not None:
+                wall_quad_int = wall_quad.reshape((-1, 1, 2)).astype(np.int32)
+                cv2.polylines(
+                    background_with_wallquad_quads,
+                    [wall_quad_int],
+                    isClosed=True,
+                    color=(255, 0, 0),
+                    thickness=3,
+                )
 
-        wall_mask = np.zeros(image.shape[:2], dtype=np.uint8)
-        cv2.drawContours(wall_mask, [cnt], -1, 255, thickness=cv2.FILLED)
-        try:
-            wall_quad = estimate_wall_quadrilateral(wall_mask, image=image)
-        except ValueError:
-            wall_quad = None
-        except Exception as exc:
-            print(f"Erreur lors de l'estimation du quadrilatère avec wallquad: {exc}")
-            wall_quad = None
+            # 2. Choisir une texture (on ne la tourne pas ici)
+            chosen_texture = random.choice(textures)
+            dilatatedcnt = dilate_contour(cnt, image.shape, 3)
+            x, y, w, h = cv2.boundingRect(dilatatedcnt)
+            if quadrilateral_points:
+                overlay_points = [
+                    quadrilateral_points[0],  # top-left
+                    quadrilateral_points[3],  # top-right
+                    quadrilateral_points[2],  # bottom-right
+                    quadrilateral_points[1],  # bottom-left
+                ]
+                try:
+                    tiled_texture = tile_texture(chosen_texture, max(w, 1), max(h, 1))
+                    textured_image = project_texture(
+                        textured_image,
+                        tiled_texture,
+                        overlay_points,
+                        clip_mask=wall_mask,
+                    )
+                    continue
+                except Exception as exc:
+                    print(f"Projection perspective échouée, utilisation du remplissage classique: {exc}")
 
-        if wall_quad is not None:
-            wall_quad_int = wall_quad.reshape((-1, 1, 2)).astype(np.int32)
-            cv2.polylines(
-                background_with_wallquad_quads,
-                [wall_quad_int],
-                isClosed=True,
-                color=(255, 0, 0),
-                thickness=3,
+            # chosen_texture = textures[2]
+            # 3. Préparer la zone de destination
+
+            # 4. Créer la transformation inverse pour le pavage rotatif
+            # La rotation est centrée sur le centre de la zone à remplir (w/2, h/2)
+            # On utilise l'angle positif car c'est une map inverse (destination -> source)
+            M_inv = cv2.getRotationMatrix2D((w / 2, h / 2), -angle, 1)
+
+            # 5. Appliquer la transformation
+            # warpAffine va remplir la zone (w,h) en utilisant la texture 'chosen_texture'
+            # et en la répétant grâce à BORDER_WRAP pour un pavage parfait.
+            textured_roi = cv2.warpAffine(
+                chosen_texture,
+                M_inv,
+                (w, h),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_WRAP
             )
 
-        # 2. Choisir une texture (on ne la tourne pas ici)
-        chosen_texture = random.choice(textures)
-        #chosen_texture = textures[2]
-        # 3. Préparer la zone de destination
-        dilatatedcnt = dilate_contour(cnt, image.shape, 3)
-        x, y, w, h = cv2.boundingRect(dilatatedcnt)
+            # 6. Appliquer le masque pour ne garder que la forme du contour
+            mask = np.zeros((h, w), dtype=np.uint8)
+            # On déplace le contour pour qu'il soit à l'origine (0,0) du masque
+            cv2.drawContours(mask, [dilatatedcnt - (x, y)], -1, 255, thickness=cv2.FILLED)
 
-        # 4. Créer la transformation inverse pour le pavage rotatif
-        # La rotation est centrée sur le centre de la zone à remplir (w/2, h/2)
-        # On utilise l'angle positif car c'est une map inverse (destination -> source)
-        M_inv = cv2.getRotationMatrix2D((w / 2, h / 2), -angle, 1)
+            textured_region = cv2.bitwise_and(textured_roi, textured_roi, mask=mask)
 
-        # 5. Appliquer la transformation
-        # warpAffine va remplir la zone (w,h) en utilisant la texture 'chosen_texture'
-        # et en la répétant grâce à BORDER_WRAP pour un pavage parfait.
-        textured_roi = cv2.warpAffine(
-            chosen_texture,
-            M_inv,
-            (w, h),
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_WRAP
-        )
+            # 7. Fusionner avec l'image finale
+            roi_bg = textured_image[y:y + h, x:x + w]
+            roi_bg_masked = cv2.bitwise_and(roi_bg, roi_bg, mask=cv2.bitwise_not(mask))
+            textured_image[y:y + h, x:x + w] = cv2.add(roi_bg_masked, textured_region)
 
-        # 6. Appliquer le masque pour ne garder que la forme du contour
-        mask = np.zeros((h, w), dtype=np.uint8)
-        # On déplace le contour pour qu'il soit à l'origine (0,0) du masque
-        cv2.drawContours(mask, [dilatatedcnt - (x, y)], -1, 255, thickness=cv2.FILLED)
-
-        textured_region = cv2.bitwise_and(textured_roi, textured_roi, mask=mask)
-
-        # 7. Fusionner avec l'image finale
-        roi_bg = final_result[y:y + h, x:x + w]
-        roi_bg_masked = cv2.bitwise_and(roi_bg, roi_bg, mask=cv2.bitwise_not(mask))
-        final_result[y:y + h, x:x + w] = cv2.add(roi_bg_masked, textured_region)
-
-    final_composite = mergeimages(image, final_result)
-    cv2.imwrite(path + "_combined.jpg", final_composite)
+    cv2.imwrite(path + "_combined.jpg", textured_image)
     cv2.imwrite(path + "_background_quadrilaterals.jpg", background_with_quads)
     cv2.imwrite(path + "_background_wallquad_quadrilaterals.jpg", background_with_wallquad_quads)
 
