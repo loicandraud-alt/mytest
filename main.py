@@ -7,9 +7,7 @@ from collections import deque
 
 from PIL import Image, ImageFilter
 
-from webercolor.linequedrilareral import quadrilateral_from_lines
 from typing import List, Tuple
-from webercolor.linequedrilareral import quadrilateral_from_lines
 from wallquad import estimate_wall_quadrilateral
 from perpspectiveoverlay import project_texture
 
@@ -132,6 +130,36 @@ def dilate_contour(cnt, image_shape, dilation_px=4):
     return new_cnts[0]
 
 
+def contour_centroid(contour):
+    moments = cv2.moments(contour)
+    if moments["m00"] != 0:
+        return (
+            int(moments["m10"] / moments["m00"]),
+            int(moments["m01"] / moments["m00"]),
+        )
+    return tuple(contour[0][0])
+
+
+def build_contour_mask(target_contour, all_contours, image_shape):
+    mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    cv2.drawContours(mask, [target_contour], -1, 255, thickness=cv2.FILLED)
+
+    exclusion = np.zeros_like(mask)
+    for other in all_contours:
+        if other is None or len(other) == 0 or other is target_contour:
+            continue
+
+        centroid = contour_centroid(other)
+        if cv2.pointPolygonTest(target_contour, centroid, False) >= 0:
+            cv2.drawContours(exclusion, [other], -1, 255, thickness=cv2.FILLED)
+
+    if cv2.countNonZero(exclusion) == 0:
+        return mask
+
+    return cv2.bitwise_and(mask, cv2.bitwise_not(exclusion))
+
+
+
 def mergeimages(image1, image2):
     gray_result = cv2.cvtColor(image2, cv2.COLOR_BGR2GRAY)
     _, texture_mask = cv2.threshold(gray_result, 1, 255, cv2.THRESH_BINARY)
@@ -248,33 +276,51 @@ def findPointsFromContour(cnt):
     if len(approx) < 2:
         return None
 
-    segments = []
+    hor_segmentsbylength = []
+    hor_segmentsbyheight = []
+    hor_segmentsbyheightdesc = []
     for i in range(len(approx)):
         pt1 = approx[i][0]
         pt2 = approx[(i + 1) % len(approx)][0]
         dx = pt2[0] - pt1[0]
         dy = pt2[1] - pt1[1]
         length = math.hypot(dx, dy)
-        segments.append((length, dx, dy, pt1, pt2))
+        height = min(pt2[1],pt1[1])
+        angle_deg = math.degrees(math.atan2(dy, dx))
+        angle_deg = - angle_deg % 180
+        # Vertical walls stay vertical despite perspspective
+        if angle_deg < 80 or angle_deg > 100:
+        #if abs(dx/dy) > 60:
+            hor_segmentsbylength.append((length, height, dx, dy, pt1, pt2))
+            hor_segmentsbyheight.append((length, height, dx, dy, pt1, pt2))
+            hor_segmentsbyheightdesc.append((length, height, dx, dy, pt1, pt2))
 
-    segments.sort(key=lambda seg: seg[0], reverse=True)
+    hor_segmentsbylength.sort(key=lambda seg: seg[0], reverse=True)
+    hor_segmentsbyheight.sort(key=lambda seg: seg[1], reverse=True)
+    hor_segmentsbyheightdesc.sort(key=lambda seg: seg[1], reverse=False)
 
-    outpt11 = outpt12 = outpt21 = outpt22 = None
+    outpt11 = outpt12 = None
+    outpt11_ = outpt12_ = None
+    outpt21 = outpt22 = None
+    if (hor_segmentsbylength):
+        #longest
+        outpt11 = hor_segmentsbylength[0][4]
+        outpt12 = hor_segmentsbylength[0][5]
 
-    for length, dx, dy, pt1, pt2 in segments:
-        # To improve, if vertical lnes
-        if abs(dx) < 50 : #and abs(dy > 30):
-            continue
-        if outpt11 is None:
-            outpt11 = pt1
-            outpt12 = pt2
-        elif outpt21 is None:
-            outpt21 = pt1
-            outpt22 = pt2
-            break
-    if any(pt is None for pt in (outpt11, outpt12, outpt21, outpt22)):
+        #highest
+        outpt11_ = hor_segmentsbyheightdesc[0][4]
+        outpt12_ = hor_segmentsbyheightdesc[0][5]
+        #lowest
+        outpt21 = hor_segmentsbyheight[0][4]
+        outpt22 = hor_segmentsbyheight[0][5]
+
+
+    if any(pt is None for pt in (outpt11_, outpt12_, outpt21, outpt22)):
         return None
-    return outpt11, outpt12, outpt21, outpt22
+    print(f"Line 1: {outpt11_, outpt12_}")
+    print(f"Line 2: {outpt21, outpt22}")
+
+    return outpt11_, outpt12_, outpt21, outpt22
 
 Point = Tuple[float, float]
 Line = Tuple[Point, Point]
@@ -398,26 +444,26 @@ def drawFile(path, image, edges, dilatation, mode):
     toto = floodfill_extract_contours(myedgesdilatated)
     textured_image = image.copy()
     background_with_quads = image.copy()
-    background_with_wallquad_quads = image.copy()
 
     # Charger et préparer les textures
     textures_files = {
         "brique": cv2.resize(cv2.imread("../webercolor/textures/brique.jpg"), (0, 0), fx=0.5, fy=0.5),
-        "brique2": cv2.resize(cv2.imread("../webercolor/textures/brique2.jpg"), (0, 0), fx=0.2, fy=0.2),
+        #"brique2": cv2.resize(cv2.imread("../webercolor/textures/brique2.jpg"), (0, 0), fx=0.2, fy=0.2),
         "brique3": cv2.resize(cv2.imread("../webercolor/textures/brique3.jpg"), (0, 0), fx=0.2, fy=0.2),
-        "bois1": cv2.resize(cv2.imread("../webercolor/textures/bois1.jpg"), (0, 0), fx=0.5, fy=0.5),
-        "bois2": cv2.resize(cv2.imread("../webercolor/textures/bois2.jpg"), (0, 0), fx=0.2, fy=0.2),
-        "pierre": cv2.resize(cv2.imread("../webercolor/textures/pierre.jpg"), (0, 0), fx=0.1, fy=0.1),
-        "enduit1": cv2.resize(cv2.imread("../webercolor/textures/enduit1.jpg"), (0, 0), fx=0.05, fy=0.05),
+        #"bois1": cv2.resize(cv2.imread("../webercolor/textures/bois1.jpg"), (0, 0), fx=0.5, fy=0.5),
+        #"bois2": cv2.resize(cv2.imread("../webercolor/textures/bois2.jpg"), (0, 0), fx=0.2, fy=0.2),
+        #"pierre": cv2.resize(cv2.imread("../webercolor/textures/pierre.jpg"), (0, 0), fx=0.1, fy=0.1),
+        #"enduit1": cv2.resize(cv2.imread("../webercolor/textures/enduit1.jpg"), (0, 0), fx=0.05, fy=0.05),
     }
     textures = list(textures_files.values())
     checkContoursIndide(toto)
     done = 0
 
     for cnt in toto:
-        if done != 0:
+        if done > 100:
             continue
         done = done + 1
+
         #1. Obtenir l'angle et prendre son opposé pour la correction␊
         angle = findAngle2(cnt)
         points = findPointsFromContour(cnt)
@@ -433,8 +479,7 @@ def drawFile(path, image, edges, dilatation, mode):
             if quadrilateral_points:
                 quad_array = np.array([[int(round(x)), int(round(y))] for x, y in quadrilateral_points],          dtype=np.int32)
                 cv2.polylines(background_with_quads, [quad_array], isClosed=True, color=(0, 0, 255), thickness=3)
-            wall_mask = np.zeros(image.shape[:2], dtype=np.uint8)
-            cv2.drawContours(wall_mask, [cnt], -1, 255, thickness=cv2.FILLED)
+            wall_mask = build_contour_mask(cnt, toto, image.shape)
             try:
                 wall_quad = estimate_wall_quadrilateral(wall_mask, image=image)
             except ValueError:
@@ -443,15 +488,7 @@ def drawFile(path, image, edges, dilatation, mode):
                 print(f"Erreur lors de l'estimation du quadrilatère avec wallquad: {exc}")
                 wall_quad = None
 
-            if wall_quad is not None:
-                wall_quad_int = wall_quad.reshape((-1, 1, 2)).astype(np.int32)
-                cv2.polylines(
-                    background_with_wallquad_quads,
-                    [wall_quad_int],
-                    isClosed=True,
-                    color=(255, 0, 0),
-                    thickness=3,
-                )
+
 
             # 2. Choisir une texture (on ne la tourne pas ici)
             chosen_texture = random.choice(textures)
@@ -470,13 +507,11 @@ def drawFile(path, image, edges, dilatation, mode):
                         textured_image,
                         tiled_texture,
                         overlay_points,
-                        clip_mask=wall_mask,
+                        clip_mask = wall_mask,
                     )
                     continue
                 except Exception as exc:
                     print(f"Projection perspective échouée, utilisation du remplissage classique: {exc}")
-
-            # chosen_texture = textures[2]
             # 3. Préparer la zone de destination
 
             # 4. Créer la transformation inverse pour le pavage rotatif
@@ -509,7 +544,6 @@ def drawFile(path, image, edges, dilatation, mode):
 
     cv2.imwrite(path + "_combined.jpg", textured_image)
     cv2.imwrite(path + "_background_quadrilaterals.jpg", background_with_quads)
-    cv2.imwrite(path + "_background_wallquad_quadrilaterals.jpg", background_with_wallquad_quads)
 
     # Dessin des zones colorées pour visualisation
     for cnt in toto:
