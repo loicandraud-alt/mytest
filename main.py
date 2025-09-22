@@ -8,8 +8,12 @@ from collections import deque
 from PIL import Image, ImageFilter
 
 from typing import List, Tuple
-from wallquad import estimate_wall_quadrilateral
 from perpspectiveoverlay import project_texture
+from webercolor.contourUtils import checkContoursIndide, contour_area, build_contour_mask, dilate_contour, \
+    findPointsFromContour
+from webercolor.imageUtils import floodfill_extract_contours, boostimagegray
+from webercolor.quadri import quadrilateral_from_lines
+
 
 def maxlength(approx):
     max_len = 0.0
@@ -22,91 +26,9 @@ def maxlength(approx):
     return max_len
 
 
-def filled_area_touche_haut(filled_area):
-    return np.any(filled_area[0] == 255)
 
 
-def filled_area_touche_bas(filled_area):
-    return np.any(filled_area[-1] == 255)
 
-
-def floodfill_extract_contours(image_gray):
-    """
-    Utilise floodFill pour détecter chaque zone noire connectée,
-    évite les pixels déjà remplis, et retourne les vrais contours.
-    """
-    img = image_gray.copy()
-    h, w = img.shape
-    contours = []
-
-    # floodFill a besoin d'un masque 2 pixels plus grand
-    mask = np.zeros((h + 2, w + 2), np.uint8)
-
-    for y in range(h):
-        for x in range(w):
-            if img[y, x] == 0:  # pixel noir non traité (car floodFill va peindre en 255)
-                # Reset du masque pour chaque floodFill
-                flood_mask = np.zeros((h + 2, w + 2), np.uint8)
-
-                # Appliquer floodFill : il modifie img en place
-                cv2.floodFill(img, flood_mask, seedPoint=(x, y), newVal=255)
-
-                # Extraire la zone peinte (flood_mask = 1 où rempli)
-                filled_area = (flood_mask[1:-1, 1:-1] == 1).astype(np.uint8) * 255
-                surface_pixels = cv2.countNonZero(filled_area)
-                if surface_pixels > 5000:
-                    if (not filled_area_touche_haut(filled_area) and not filled_area_touche_bas(filled_area)):
-                        cnts, _ = cv2.findContours(filled_area, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
-                        contours.extend(cnts)
-
-    return contours
-
-def checkContoursIndide(contours):
-    """Log l'appartenance d'un contour à un autre dans la même liste.
-
-    Pour chaque contour, on tente de récupérer un point représentatif (le
-    centroïde si possible) et on vérifie si ce point est situé à l'intérieur
-    d'un ou plusieurs autres contours de la liste. Les informations sont
-    affichées via ``print`` et la structure de résultat est retournée pour un
-    usage éventuel ultérieur.
-    """
-
-    inclusion_map = []
-
-    for idx, contour in enumerate(contours):
-        if contour is None or len(contour) == 0:
-            inclusion_map.append((idx, []))
-            print(f"Contour {idx} est vide ou non défini.")
-            continue
-
-        # Calcul d'un point de test : centroïde si disponible, sinon premier point
-        moments = cv2.moments(contour)
-        if moments["m00"] != 0:
-            point = (
-                int(moments["m10"] / moments["m00"]),
-                int(moments["m01"] / moments["m00"]),
-            )
-        else:
-            point = tuple(contour[0][0])
-
-        parents = []
-        for other_idx, other in enumerate(contours):
-            if other_idx == idx or other is None or len(other) == 0:
-                continue
-
-            # pointPolygonTest retourne > 0 si point à l'intérieur, 0 sur le bord
-            # et < 0 si à l'extérieur. On accepte l'intérieur ou sur le bord.
-            if cv2.pointPolygonTest(other, point, False) >= 0:
-                parents.append(other_idx)
-
-        if parents:
-            print(f"Contour {idx} est entouré par les contours {parents}.")
-        else:
-            print(f"Contour {idx} n'est entouré par aucun autre contour.")
-
-        inclusion_map.append((idx, parents))
-
-    return inclusion_map
 
 def findlines(edges):
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100, minLineLength=100, maxLineGap=10)
@@ -120,43 +42,8 @@ def findlines(edges):
     return lines_img
 
 
-def dilate_contour(cnt, image_shape, dilation_px=4):
-    mask = np.zeros(image_shape[:2], dtype=np.uint8)
-    cv2.drawContours(mask, [cnt], -1, 255, thickness=cv2.FILLED)
-    kernel_size = 2 * dilation_px + 1
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-    dilated = cv2.dilate(mask, kernel, iterations=1)
-    new_cnts, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    return new_cnts[0]
 
 
-def contour_centroid(contour):
-    moments = cv2.moments(contour)
-    if moments["m00"] != 0:
-        return (
-            int(moments["m10"] / moments["m00"]),
-            int(moments["m01"] / moments["m00"]),
-        )
-    return tuple(contour[0][0])
-
-
-def build_contour_mask(target_contour, all_contours, image_shape):
-    mask = np.zeros(image_shape[:2], dtype=np.uint8)
-    cv2.drawContours(mask, [target_contour], -1, 255, thickness=cv2.FILLED)
-
-    exclusion = np.zeros_like(mask)
-    for other in all_contours:
-        if other is None or len(other) == 0 or other is target_contour:
-            continue
-
-        centroid = contour_centroid(other)
-        if cv2.pointPolygonTest(target_contour, centroid, False) >= 0:
-            cv2.drawContours(exclusion, [other], -1, 255, thickness=cv2.FILLED)
-
-    if cv2.countNonZero(exclusion) == 0:
-        return mask
-
-    return cv2.bitwise_and(mask, cv2.bitwise_not(exclusion))
 
 
 
@@ -191,18 +78,6 @@ def tile_texture(texture: np.ndarray, target_width: int, target_height: int) -> 
         tiled = np.tile(texture, (repeat_y, repeat_x, 1))
         return tiled[:target_height, :target_width]
 
-def boostimagegray(img):
-        alpha = 1
-        beta = 0
-        adjusted = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
-        hsv = cv2.cvtColor(adjusted, cv2.COLOR_BGR2HSV)
-
-        h, s, v = cv2.split(hsv)
-        s = cv2.multiply(s, 1.5)
-        s = np.clip(s, 0, 255).astype(np.uint8)
-        hsv_boosted = cv2.merge((h, s, v))
-        color_boosted = cv2.cvtColor(hsv_boosted, cv2.COLOR_HSV2BGR)
-        return cv2.cvtColor(color_boosted, cv2.COLOR_BGR2GRAY)
 
 
 def findAngle(cnt):
@@ -262,178 +137,12 @@ def findAngle2(cnt):
 
     return 0
 
-def findPointsFromContour(cnt):
-    """
-    Calcule les deux segments les plus longs non verticaux d'un contour.
-
-    Returns:
-        Tuple des quatre points constituant les deux segments ou ``None`` si
-        aucun couple valide n'est trouvé.
-    """
-    epsilon = 0.02 * cv2.arcLength(cnt, True)
-    approx = cv2.approxPolyDP(cnt, epsilon, True)
-
-    if len(approx) < 2:
-        return None
-
-    hor_segmentsbylength = []
-    hor_segmentsbyheight = []
-    hor_segmentsbyheightdesc = []
-    for i in range(len(approx)):
-        pt1 = approx[i][0]
-        pt2 = approx[(i + 1) % len(approx)][0]
-        dx = pt2[0] - pt1[0]
-        dy = pt2[1] - pt1[1]
-        length = math.hypot(dx, dy)
-        height = min(pt2[1],pt1[1])
-        angle_deg = math.degrees(math.atan2(dy, dx))
-        angle_deg = - angle_deg % 180
-        # Vertical walls stay vertical despite perspspective
-        if angle_deg < 80 or angle_deg > 100:
-        #if abs(dx/dy) > 60:
-            hor_segmentsbylength.append((length, height, dx, dy, pt1, pt2))
-            hor_segmentsbyheight.append((length, height, dx, dy, pt1, pt2))
-            hor_segmentsbyheightdesc.append((length, height, dx, dy, pt1, pt2))
-
-    hor_segmentsbylength.sort(key=lambda seg: seg[0], reverse=True)
-    hor_segmentsbyheight.sort(key=lambda seg: seg[1], reverse=True)
-    hor_segmentsbyheightdesc.sort(key=lambda seg: seg[1], reverse=False)
-
-    outpt11 = outpt12 = None
-    outpt11_ = outpt12_ = None
-    outpt21 = outpt22 = None
-    if (hor_segmentsbylength):
-        #longest
-        outpt11 = hor_segmentsbylength[0][4]
-        outpt12 = hor_segmentsbylength[0][5]
-
-        #highest
-        outpt11_ = hor_segmentsbyheightdesc[0][4]
-        outpt12_ = hor_segmentsbyheightdesc[0][5]
-        #lowest
-        outpt21 = hor_segmentsbyheight[0][4]
-        outpt22 = hor_segmentsbyheight[0][5]
 
 
-    if any(pt is None for pt in (outpt11_, outpt12_, outpt21, outpt22)):
-        return None
-    print(f"Line 1: {outpt11_, outpt12_}")
-    print(f"Line 2: {outpt21, outpt22}")
-
-    return outpt11_, outpt12_, outpt21, outpt22
-
-Point = Tuple[float, float]
-Line = Tuple[Point, Point]
-
-_EPSILON = 1e-9
-_VERTICAL_MIN_DEGREES = 75.0
-_VERTICAL_MAX_DEGREES = 105.0
 
 
-def _segment_length(line: Line) -> float:
-    """Calcule la longueur euclidienne d'un segment."""
-    (x1, y1), (x2, y2) = line
-    return math.hypot(x2 - x1, y2 - y1)
 
 
-def _normalized_angle_deg(line: Line) -> float:
-    """Retourne l'angle du segment par rapport à l'axe des abscisses dans [0, 180)."""
-    (x1, y1), (x2, y2) = line
-    angle_rad = math.atan2(y2 - y1, x2 - x1)
-    return (math.degrees(angle_rad) + 180.0) % 180.0
-
-
-def _validate_line(line: Line) -> None:
-    """Vérifie qu'un segment est utilisable (non nul et non vertical)."""
-    if math.isclose(_segment_length(line), 0.0, abs_tol=_EPSILON):
-        raise ValueError("Chaque ligne doit être définie par deux points distincts.")
-
-    angle = _normalized_angle_deg(line)
-    if _VERTICAL_MIN_DEGREES - _EPSILON <= angle <= _VERTICAL_MAX_DEGREES + _EPSILON:
-        raise ValueError(
-            "Les segments compris entre 75° et 105° sont considérés comme verticaux et ne sont pas supportés."
-        )
-
-
-def _extend_line(line: Line, factor: float) -> Line:
-    """Retourne une version prolongée d'un segment autour de son milieu."""
-    if factor <= 0:
-        raise ValueError("Le facteur d'extension doit être strictement positif.")
-
-    (x1, y1), (x2, y2) = line
-    length = _segment_length(line)
-    if math.isclose(length, 0.0, abs_tol=_EPSILON):  # sécurité supplémentaire
-        raise ValueError("Impossible d'étendre un segment de longueur nulle.")
-
-    mid_x = (x1 + x2) / 2.0
-    mid_y = (y1 + y2) / 2.0
-    unit_dx = (x2 - x1) / length
-    unit_dy = (y2 - y1) / length
-    half_extended_length = (length * factor) / 2.0
-
-    p_start = (mid_x - unit_dx * half_extended_length, mid_y - unit_dy * half_extended_length)
-    p_end = (mid_x + unit_dx * half_extended_length, mid_y + unit_dy * half_extended_length)
-    return p_start, p_end
-
-
-def _line_parameters(line: Line) -> Tuple[float, float]:
-    """Retourne la pente et l'ordonnée à l'origine d'une droite."""
-    (x1, y1), (x2, y2) = line
-    slope = (y2 - y1) / (x2 - x1)
-    intercept = y1 - slope * x1
-    return slope, intercept
-
-
-def quadrilateral_from_lines(line1: Line, line2: Line, extension_factor: float = 100.0) -> List[Point]:
-    """Construit le quadrilatère délimité par deux lignes inclinées et deux droites verticales.
-
-    Args:
-        line1: Premier segment (non vertical) défini par deux points (x, y).
-        line2: Second segment (non vertical) défini par deux points (x, y).
-        extension_factor: Facteur d'allongement appliqué à chaque segment.
-
-    Returns:
-        Les quatre sommets du quadrilatère dans l'ordre suivant :
-        haut-gauche, bas-gauche, bas-droite, haut-droite.
-
-    Raises:
-        ValueError: si une ligne est verticale, dégénérée ou si le facteur est invalide.
-    """
-    _validate_line(line1)
-    _validate_line(line2)
-
-    if extension_factor <= 0:
-        raise ValueError("Le facteur d'extension doit être strictement positif.")
-
-    length1 = _segment_length(line1)
-    length2 = _segment_length(line2)
-    longest_line = line1 if length1 >= length2 else line2
-
-    min_x = min(longest_line[0][0], longest_line[1][0])
-    max_x = max(longest_line[0][0], longest_line[1][0])
-
-    extended_line1 = _extend_line(line1, extension_factor)
-    extended_line2 = _extend_line(line2, extension_factor)
-
-    slope1, intercept1 = _line_parameters(extended_line1)
-    slope2, intercept2 = _line_parameters(extended_line2)
-
-    left_points = [
-        (min_x, slope1 * min_x + intercept1),
-        (min_x, slope2 * min_x + intercept2),
-    ]
-    right_points = [
-        (max_x, slope1 * max_x + intercept1),
-        (max_x, slope2 * max_x + intercept2),
-    ]
-
-    left_points.sort(key=lambda pt: pt[1])
-    right_points.sort(key=lambda pt: pt[1])
-
-    top_left, bottom_left = left_points
-    top_right, bottom_right = right_points
-
-    return [top_left, bottom_left, bottom_right, top_right]
 
 def drawFile(path, image, edges, dilatation, mode):
     kernel = np.ones((dilatation, dilatation), np.uint8)
@@ -464,8 +173,13 @@ def drawFile(path, image, edges, dilatation, mode):
             continue
         done = done + 1
 
+        area = contour_area(cnt)
+        if (area < 10000):
+            print(f"Contour bypassed because too small, {area}")
+            continue
+
         #1. Obtenir l'angle et prendre son opposé pour la correction␊
-        angle = findAngle2(cnt)
+        #angle = findAngle2(cnt)
         points = findPointsFromContour(cnt)
         quadrilateral_points = None
         if points is not None:
@@ -480,14 +194,6 @@ def drawFile(path, image, edges, dilatation, mode):
                 quad_array = np.array([[int(round(x)), int(round(y))] for x, y in quadrilateral_points],          dtype=np.int32)
                 cv2.polylines(background_with_quads, [quad_array], isClosed=True, color=(0, 0, 255), thickness=3)
             wall_mask = build_contour_mask(cnt, toto, image.shape)
-            try:
-                wall_quad = estimate_wall_quadrilateral(wall_mask, image=image)
-            except ValueError:
-                wall_quad = None
-            except Exception as exc:
-                print(f"Erreur lors de l'estimation du quadrilatère avec wallquad: {exc}")
-                wall_quad = None
-
 
 
             # 2. Choisir une texture (on ne la tourne pas ici)
@@ -517,7 +223,7 @@ def drawFile(path, image, edges, dilatation, mode):
             # 4. Créer la transformation inverse pour le pavage rotatif
             # La rotation est centrée sur le centre de la zone à remplir (w/2, h/2)
             # On utilise l'angle positif car c'est une map inverse (destination -> source)
-            M_inv = cv2.getRotationMatrix2D((w / 2, h / 2), -angle, 1)
+            M_inv = cv2.getRotationMatrix2D((w / 2, h / 2), 0, 1)
 
             # 5. Appliquer la transformation
             # warpAffine va remplir la zone (w,h) en utilisant la texture 'chosen_texture'
@@ -554,13 +260,25 @@ def drawFile(path, image, edges, dilatation, mode):
 
 
 # --- SCRIPT PRINCIPAL ---
-path = 'building7.jpg'
-img = cv2.imread(path)
-if img is None:
-    print(f"Erreur: Impossible de charger l'image depuis {path}")
-else:
-    gray = boostimagegray(img)
-    edges = cv2.Canny(gray, 1, 150)
+#mypath = 'building10.jpg'
+paths = ['building10.jpg','building9.jpg','building7.jpg','building5.jpg','building4.jpg','building2.jpg']
+#img = cv2.imread(mypath)
+#if img is None:
+#    print(f"Erreur: Impossible de charger l'image depuis {mypath}")
+#else:
+#    gray = boostimagegray(img)
+ #   edges = cv2.Canny(gray, 1, 150)#
 
-    color_zones1, myedges1 = drawFile(path, img, edges, 4, cv2.RETR_CCOMP)
-    cv2.imwrite(path + "_result_CCOMP_color_zones.jpg", color_zones1)
+#    color_zones1, myedges1 = drawFile(mypath, img, edges, 4, cv2.RETR_CCOMP)
+#    cv2.imwrite(mypath + "_result_CCOMP_color_zones.jpg", color_zones1)
+
+for path in paths:
+    img = cv2.imread(path)
+    if img is None:
+        print(f"Erreur: Impossible de charger l'image depuis {path}")
+    else:
+        gray = boostimagegray(img)
+        edges = cv2.Canny(gray, 1, 150)
+
+        color_zones1, myedges1 = drawFile(path, img, edges, 4, cv2.RETR_CCOMP)
+        cv2.imwrite(path + "_result_CCOMP_color_zones.jpg", color_zones1)
