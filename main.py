@@ -147,12 +147,14 @@ def findAngle2(cnt):
 def drawFile(path, image, edges, dilatation, mode):
     kernel = np.ones((dilatation, dilatation), np.uint8)
     myedgesdilatated = cv2.dilate(edges, kernel, iterations=1)
-    cv2.imwrite(path + "_result_edges.jpg", myedgesdilatated)
+    cv2.imwrite(path + "2_result_edges.jpg", myedgesdilatated)
     color_zones = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
 
     toto = floodfill_extract_contours(myedgesdilatated)
     textured_image = image.copy()
     background_with_quads = image.copy()
+    points_overlay = image.copy()
+    approx_overlay = image.copy()
 
     # Charger et préparer les textures
     textures_files = {
@@ -180,10 +182,14 @@ def drawFile(path, image, edges, dilatation, mode):
 
         #1. Obtenir l'angle et prendre son opposé pour la correction␊
         #angle = findAngle2(cnt)
-        points = findPointsFromContour(cnt)
+        points, approx = findPointsFromContour(cnt)
         quadrilateral_points = None
+        if approx is not None and len(approx) >= 2:
+            cv2.polylines(approx_overlay, [approx], isClosed=True, color=(0, 255, 0), thickness=3)
         if points is not None:
             pt11, pt12, pt21, pt22 = points
+            for pt in (pt11, pt12, pt21, pt22):
+                cv2.circle(points_overlay, (int(pt[0]), int(pt[1])), 8, (255, 0, 0), thickness=-1)
             try:
                 line1 = ((float(pt11[0]), float(pt11[1])), (float(pt12[0]), float(pt12[1])))
                 line2 = ((float(pt21[0]), float(pt21[1])), (float(pt22[0]), float(pt22[1])))
@@ -248,8 +254,10 @@ def drawFile(path, image, edges, dilatation, mode):
             roi_bg_masked = cv2.bitwise_and(roi_bg, roi_bg, mask=cv2.bitwise_not(mask))
             textured_image[y:y + h, x:x + w] = cv2.add(roi_bg_masked, textured_region)
 
-    cv2.imwrite(path + "_combined.jpg", textured_image)
-    cv2.imwrite(path + "_background_quadrilaterals.jpg", background_with_quads)
+    cv2.imwrite(path + "6_combined.jpg", textured_image)
+    cv2.imwrite(path + "5_background_quadrilaterals.jpg", background_with_quads)
+    cv2.imwrite(path + "4_points_debug.jpg", points_overlay)
+    cv2.imwrite(path + "3_approx_debug.jpg", approx_overlay)
 
     # Dessin des zones colorées pour visualisation
     for cnt in toto:
@@ -281,4 +289,4 @@ for path in paths:
         edges = cv2.Canny(gray, 1, 150)
 
         color_zones1, myedges1 = drawFile(path, img, edges, 4, cv2.RETR_CCOMP)
-        cv2.imwrite(path + "_result_CCOMP_color_zones.jpg", color_zones1)
+        cv2.imwrite(path + "_result_1CCOMP_color_zones.jpg", color_zones1)

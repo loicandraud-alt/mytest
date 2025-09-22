@@ -98,18 +98,23 @@ def build_contour_mask(target_contour, all_contours, image_shape):
     return cv2.bitwise_and(mask, cv2.bitwise_not(exclusion))
 
 def findPointsFromContour(cnt):
-    """
-    Calcule les deux segments les plus longs non verticaux d'un contour.
+    """Retourne les points caractéristiques et l'approximation polygonale.
+
+    Calcule les deux segments les plus longs non verticaux d'un contour et
+    fournit également le polygone approché obtenu via ``cv2.approxPolyDP``.
 
     Returns:
-        Tuple des quatre points constituant les deux segments ou ``None`` si
-        aucun couple valide n'est trouvé.
+        Tuple[(Tuple[np.ndarray, ...] | None), np.ndarray]:
+            - Les quatre points définissant les deux segments horizontaux
+              détectés (ou ``None`` si aucun segment valide n'est trouvé).
+            - Le polygone approché « approx » (tableau de points OpenCV).
     """
-    epsilon = 0.02 * cv2.arcLength(cnt, True)
+    epsilon = 0.002 * cv2.arcLength(cnt, True)
     approx = cv2.approxPolyDP(cnt, epsilon, True)
+    #approx = cnt
 
     if len(approx) < 2:
-        return None
+        return None, approx
 
     hor_segmentsbylength = []
     hor_segmentsbyheight = []
@@ -125,7 +130,7 @@ def findPointsFromContour(cnt):
         angle_deg = - angle_deg % 180
         # Vertical walls stay vertical despite perspspective
         if angle_deg < 80 or angle_deg > 100:
-            if abs(dx) >50 :
+            if abs(dx) >20 :
                 hor_segmentsbylength.append((length, height, dx, dy, pt1, pt2))
                 hor_segmentsbyheight.append((length, height, dx, dy, pt1, pt2))
                 hor_segmentsbyheightdesc.append((length, height, dx, dy, pt1, pt2))
@@ -149,11 +154,10 @@ def findPointsFromContour(cnt):
         outpt21 = hor_segmentsbyheight[0][4]
         outpt22 = hor_segmentsbyheight[0][5]
 
-
     if any(pt is None for pt in (outpt11_, outpt12_, outpt21, outpt22)):
-        return None
+        return None, approx
     print(f"Line 1: {outpt11_, outpt12_}")
     print(f"Line 2: {outpt21, outpt22}")
 
-    return outpt11_, outpt12_, outpt21, outpt22
+    return (outpt11_, outpt12_, outpt21, outpt22), approx
 
