@@ -142,28 +142,21 @@ def findAngle2(cnt):
 
 
 
-def drawFile(path, dilatation, mode):
-
-    #thersholdForAContour = 0.002
+def preprocess_image(path, dilatation):
     image = cv2.imread(path)
     gray = boostimagegray(image)
     edges = cv2.Canny(gray, 1, 150)
     kernel = np.ones((dilatation, dilatation), np.uint8)
-    myedgesdilatated = cv2.dilate(edges, kernel, iterations=1)
-    cv2.imwrite(path + "1_result_edges.jpg", myedgesdilatated)
-    color_zones = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
+    edges_dilated = cv2.dilate(edges, kernel, iterations=1)
+    cv2.imwrite(path + "1_result_edges.jpg", edges_dilated)
+    return image, edges_dilated
 
 
+def initialize_overlays(image):
+    return image.copy(), image.copy(), image.copy(), image.copy()
 
-    toto = floodfill_extract_contours(myedgesdilatated)
-    textured_image = image.copy()
-    background_with_quads = image.copy()
-    points_overlay = image.copy()
-    approx_overlay = image.copy()
 
-    #contour_area_threshold = thersholdForAContour * float(image.shape[0] * image.shape[1])
-
-    # Charger et préparer les textures
+def load_textures():
     textures_files = {
         "brique": cv2.resize(cv2.imread("../webercolor/textures/brique.jpg"), (0, 0), fx=0.5, fy=0.5),
         #"brique2": cv2.resize(cv2.imread("../webercolor/textures/brique2.jpg"), (0, 0), fx=0.2, fy=0.2),
@@ -173,28 +166,20 @@ def drawFile(path, dilatation, mode):
         #"pierre": cv2.resize(cv2.imread("../webercolor/textures/pierre.jpg"), (0, 0), fx=0.1, fy=0.1),
         #"enduit1": cv2.resize(cv2.imread("../webercolor/textures/enduit1.jpg"), (0, 0), fx=0.05, fy=0.05),
     }
-    textures = list(textures_files.values())
-    contours_inclusion = checkContoursIndide(toto)
+    return list(textures_files.values())
+
+
+def process_contours(image, contours, textures):
+    textured_image, background_with_quads, points_overlay, approx_overlay = initialize_overlays(image)
+    contours_inclusion = checkContoursIndide(contours)
     print(f"contours_inclusion, {contours_inclusion}")
     done = 0
 
-    for idx, cnt in enumerate(toto):
+    for idx, cnt in enumerate(contours):
         parents = contours_inclusion[idx][1]
         if len(parents) > 0:
-            print(
-                "Contour %d ignoré car entièrement inclus dans %s." % (idx, parents)
-            )
+            print("Contour %d ignoré car entièrement inclus dans %s." % (idx, parents))
             continue
-
-        #area = contour_area(cnt)
-        #if area < contour_area_threshold:
-        #    print(
-        #        "Contour bypassed because too small (%.2f < %.2f)" % (
-        #            area,
-        #            contour_area_threshold,
-        #        )
-        #    )
-        #    continue
 
         if done >= 100:
             break
@@ -215,78 +200,59 @@ def drawFile(path, dilatation, mode):
                 contour_x = cnt[:, 0, 0]
                 min_x = float(np.min(contour_x))
                 max_x = float(np.max(contour_x))
-                quadrilateral_points = quadrilateral_from_lines2(
-                    line1,
-                    line2,
-                    x_bounds=(min_x, max_x),
-                )
+                quadrilateral_points = quadrilateral_from_lines2(line1, line2, x_bounds=(min_x, max_x))
             except ValueError:
                 quadrilateral_points = None
             if quadrilateral_points:
-                quad_array = np.array([[int(round(x)), int(round(y))] for x, y in quadrilateral_points],          dtype=np.int32)
+                quad_array = np.array([[int(round(x)), int(round(y))] for x, y in quadrilateral_points], dtype=np.int32)
                 cv2.polylines(background_with_quads, [quad_array], isClosed=True, color=(0, 0, 255), thickness=3)
-            wall_mask = build_contour_mask(cnt, toto, image.shape)
+
+        wall_mask = build_contour_mask(cnt, contours, image.shape)
+        chosen_texture = random.choice(textures)
+        dilatatedcnt = dilate_contour(cnt, image.shape, 3)
+        x, y, w, h = cv2.boundingRect(dilatatedcnt)
+        if quadrilateral_points:
+            overlay_points = [
+                quadrilateral_points[0],  # top-left
+                quadrilateral_points[3],  # top-right
+                quadrilateral_points[2],  # bottom-right
+                quadrilateral_points[1],  # bottom-left
+            ]
+            try:
+                tiled_texture = tile_texture(chosen_texture, max(w, 1), max(h, 1))
+                textured_image = project_texture(
+                    textured_image,
+                    tiled_texture,
+                    overlay_points,
+                    clip_mask=wall_mask,
+                )
+                continue
+            except Exception as exc:
+                print(f"Projection perspective échouée, utilisation du remplissage classique: {exc}")
+
+        M_inv = cv2.getRotationMatrix2D((w / 2, h / 2), 0, 1)
+        textured_roi = cv2.warpAffine(
+            chosen_texture,
+            M_inv,
+            (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_WRAP,
+        )
+
+        mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.drawContours(mask, [dilatatedcnt - (x, y)], -1, 255, thickness=cv2.FILLED)
+        textured_region = cv2.bitwise_and(textured_roi, textured_roi, mask=mask)
+
+        roi_bg = textured_image[y:y + h, x:x + w]
+        roi_bg_masked = cv2.bitwise_and(roi_bg, roi_bg, mask=cv2.bitwise_not(mask))
+        textured_image[y:y + h, x:x + w] = cv2.add(roi_bg_masked, textured_region)
+
+    return textured_image, background_with_quads, points_overlay, approx_overlay
 
 
-            # 2. Choisir une texture (on ne la tourne pas ici)
-            chosen_texture = random.choice(textures)
-            dilatatedcnt = dilate_contour(cnt, image.shape, 3)
-            x, y, w, h = cv2.boundingRect(dilatatedcnt)
-            if quadrilateral_points:
-                overlay_points = [
-                    quadrilateral_points[0],  # top-left
-                    quadrilateral_points[3],  # top-right
-                    quadrilateral_points[2],  # bottom-right
-                    quadrilateral_points[1],  # bottom-left
-                ]
-                try:
-                    tiled_texture = tile_texture(chosen_texture, max(w, 1), max(h, 1))
-                    textured_image = project_texture(
-                        textured_image,
-                        tiled_texture,
-                        overlay_points,
-                        clip_mask = wall_mask,
-                    )
-                    continue
-                except Exception as exc:
-                    print(f"Projection perspective échouée, utilisation du remplissage classique: {exc}")
-            # 3. Préparer la zone de destination
-
-            # 4. Créer la transformation inverse pour le pavage rotatif
-            # La rotation est centrée sur le centre de la zone à remplir (w/2, h/2)
-            # On utilise l'angle positif car c'est une map inverse (destination -> source)
-            M_inv = cv2.getRotationMatrix2D((w / 2, h / 2), 0, 1)
-
-            # 5. Appliquer la transformation
-            # warpAffine va remplir la zone (w,h) en utilisant la texture 'chosen_texture'
-            # et en la répétant grâce à BORDER_WRAP pour un pavage parfait.
-            textured_roi = cv2.warpAffine(
-                chosen_texture,
-                M_inv,
-                (w, h),
-                flags=cv2.INTER_LINEAR,
-                borderMode=cv2.BORDER_WRAP
-            )
-
-            # 6. Appliquer le masque pour ne garder que la forme du contour
-            mask = np.zeros((h, w), dtype=np.uint8)
-            # On déplace le contour pour qu'il soit à l'origine (0,0) du masque
-            cv2.drawContours(mask, [dilatatedcnt - (x, y)], -1, 255, thickness=cv2.FILLED)
-
-            textured_region = cv2.bitwise_and(textured_roi, textured_roi, mask=mask)
-
-            # 7. Fusionner avec l'image finale
-            roi_bg = textured_image[y:y + h, x:x + w]
-            roi_bg_masked = cv2.bitwise_and(roi_bg, roi_bg, mask=cv2.bitwise_not(mask))
-            textured_image[y:y + h, x:x + w] = cv2.add(roi_bg_masked, textured_region)
-
-    cv2.imwrite(path + "6_combined.jpg", textured_image)
-    cv2.imwrite(path + "5_background_quadrilaterals.jpg", background_with_quads)
-    cv2.imwrite(path + "4_points_debug.jpg", points_overlay)
-    cv2.imwrite(path + "3_approx_hull.jpg", approx_overlay)
-
-    # Dessin des zones colorées pour visualisation
-    for contour_index, cnt in enumerate(toto):
+def build_color_zones(image_shape, contours):
+    color_zones = np.zeros((image_shape[0], image_shape[1], 3), dtype=np.uint8)
+    for contour_index, cnt in enumerate(contours):
         random_color = tuple(np.random.randint(0, 256, size=3).tolist())
         cv2.drawContours(color_zones, [cnt], -1, random_color, thickness=cv2.FILLED)
 
@@ -309,13 +275,45 @@ def drawFile(path, dilatation, mode):
             2,
             lineType=cv2.LINE_AA,
         )
+    return color_zones
+
+
+
+
+def drawFile(path, dilatation, mode):
+    image, edges_dilated = preprocess_image(path, dilatation)
+    contours = floodfill_extract_contours(edges_dilated)
+    textures = load_textures()
+    textured_image, background_with_quads, points_overlay, approx_overlay = process_contours(
+        image,
+        contours,
+        textures,
+    )
+    color_zones = build_color_zones(image.shape, contours)
+    cv2.imwrite(path + "6_combined.jpg", textured_image)
+    cv2.imwrite(path + "5_background_quadrilaterals.jpg", background_with_quads)
+    cv2.imwrite(path + "4_points_debug.jpg", points_overlay)
+    cv2.imwrite(path + "3_approx_hull.jpg", approx_overlay)
     cv2.imwrite(path + "2CCOMP_color_zones.jpg", color_zones)
-    return color_zones, myedgesdilatated
+    return color_zones, edges_dilated
 
 
 # --- SCRIPT PRINCIPAL ---
 
-paths = ['building10.jpg','building9.jpg','building7.jpg','building5.jpg','building4.jpg','building2.jpg']
+paths = [
+    'building16.jpg',
+    'building15.jpg',
+    'building14.jpg',
+    'building13.jpg',
+    'building12.jpg',
+    'building11.jpg',
+
+    'building10.jpg',
+    'building9.jpg',
+    'building7.jpg',
+    'building5.jpg',
+    'building4.jpg',
+    'building2.jpg']
 #paths = ['building5.jpg']
 for path in paths:
-    drawFile(path, 4, cv2.RETR_CCOMP)
+    drawFile('images/' + path, 4, cv2.RETR_CCOMP)
