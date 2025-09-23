@@ -1,17 +1,14 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
+
 import random
 import math
-from collections import deque
 
-from PIL import Image, ImageFilter
-
-from typing import List, Tuple
 from perpspectiveoverlay import project_texture
 from webercolor.contourUtils import checkContoursIndide, contour_area, build_contour_mask, dilate_contour, \
     findPointsFromContour, findPointsFromContour2
-from webercolor.imageUtils import floodfill_extract_contours, boostimagegray
+from webercolor.contourUtils import floodfill_extract_contours
+from webercolor.imageUtils import boostimagegray
 from webercolor.quadri import quadrilateral_from_lines, quadrilateral_from_lines2
 
 
@@ -30,16 +27,17 @@ def maxlength(approx):
 
 
 
-def findlines(edges):
-    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100, minLineLength=100, maxLineGap=10)
-    lines_img = np.zeros_like(img)
+#def findlines(edges):
+#    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100, minLineLength=100, maxLineGap=10)
+#    lines_img = np.zeros_like(img)
 
     # Dessiner les lignes
-    if lines is not None:
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            cv2.line(lines_img, (x1, y1), (x2, y2), (0, 0, 255), 2)  # rouge
-    return lines_img
+#    if lines is not None:
+#        for line in lines:
+#            x1, y1, x2, y2 = line[0]
+#            x1, y1, x2, y2 = line[0]
+#            cv2.line(lines_img, (x1, y1), (x2, y2), (0, 0, 255), 2)  # rouge
+#    return lines_img
 
 
 
@@ -144,11 +142,18 @@ def findAngle2(cnt):
 
 
 
-def drawFile(path, image, edges, dilatation, mode):
+def drawFile(path, dilatation, mode):
+
+    #thersholdForAContour = 0.002
+    image = cv2.imread(path)
+    gray = boostimagegray(image)
+    edges = cv2.Canny(gray, 1, 150)
     kernel = np.ones((dilatation, dilatation), np.uint8)
     myedgesdilatated = cv2.dilate(edges, kernel, iterations=1)
-    cv2.imwrite(path + "2_result_edges.jpg", myedgesdilatated)
+    cv2.imwrite(path + "1_result_edges.jpg", myedgesdilatated)
     color_zones = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
+
+
 
     toto = floodfill_extract_contours(myedgesdilatated)
     textured_image = image.copy()
@@ -156,8 +161,7 @@ def drawFile(path, image, edges, dilatation, mode):
     points_overlay = image.copy()
     approx_overlay = image.copy()
 
-    image_total_area = float(image.shape[0] * image.shape[1])
-    contour_area_threshold = 0.002 * image_total_area
+    #contour_area_threshold = thersholdForAContour * float(image.shape[0] * image.shape[1])
 
     # Charger et préparer les textures
     textures_files = {
@@ -182,22 +186,20 @@ def drawFile(path, image, edges, dilatation, mode):
             )
             continue
 
-        area = contour_area(cnt)
-        if area < contour_area_threshold:
-            print(
-                "Contour bypassed because too small (%.2f < %.2f)" % (
-                    area,
-                    contour_area_threshold,
-                )
-            )
-            continue
+        #area = contour_area(cnt)
+        #if area < contour_area_threshold:
+        #    print(
+        #        "Contour bypassed because too small (%.2f < %.2f)" % (
+        #            area,
+        #            contour_area_threshold,
+        #        )
+        #    )
+        #    continue
 
         if done >= 100:
             break
         done += 1
 
-        #1. Obtenir l'angle et prendre son opposé pour la correction␊
-        #angle = findAngle2(cnt)
         points, approx = findPointsFromContour(cnt)
         quadrilateral_points = None
         if approx is not None and len(approx) >= 2:
@@ -281,7 +283,7 @@ def drawFile(path, image, edges, dilatation, mode):
     cv2.imwrite(path + "6_combined.jpg", textured_image)
     cv2.imwrite(path + "5_background_quadrilaterals.jpg", background_with_quads)
     cv2.imwrite(path + "4_points_debug.jpg", points_overlay)
-    cv2.imwrite(path + "3_approx_debug.jpg", approx_overlay)
+    cv2.imwrite(path + "3_approx_hull.jpg", approx_overlay)
 
     # Dessin des zones colorées pour visualisation
     for contour_index, cnt in enumerate(toto):
@@ -307,32 +309,13 @@ def drawFile(path, image, edges, dilatation, mode):
             2,
             lineType=cv2.LINE_AA,
         )
-
+    cv2.imwrite(path + "2CCOMP_color_zones.jpg", color_zones)
     return color_zones, myedgesdilatated
 
 
 # --- SCRIPT PRINCIPAL ---
-#mypath = 'building10.jpg'
+
 paths = ['building10.jpg','building9.jpg','building7.jpg','building5.jpg','building4.jpg','building2.jpg']
-#paths = ['building7.jpg']
-
-#img = cv2.imread(mypath)
-#if img is None:
-#    print(f"Erreur: Impossible de charger l'image depuis {mypath}")
-#else:
-#    gray = boostimagegray(img)
- #   edges = cv2.Canny(gray, 1, 150)#
-
-#    color_zones1, myedges1 = drawFile(mypath, img, edges, 4, cv2.RETR_CCOMP)
-#    cv2.imwrite(mypath + "_result_CCOMP_color_zones.jpg", color_zones1)
-
+#paths = ['building5.jpg']
 for path in paths:
-    img = cv2.imread(path)
-    if img is None:
-        print(f"Erreur: Impossible de charger l'image depuis {path}")
-    else:
-        gray = boostimagegray(img)
-        edges = cv2.Canny(gray, 1, 150)
-
-        color_zones1, myedges1 = drawFile(path, img, edges, 4, cv2.RETR_CCOMP)
-        cv2.imwrite(path + "_result_1CCOMP_color_zones.jpg", color_zones1)
+    drawFile(path, 4, cv2.RETR_CCOMP)

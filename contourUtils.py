@@ -240,3 +240,44 @@ def findPointsFromContour2(cnt):
 
     print(f"Dominant top line: {(top_pt1, top_pt2)}")
     print(f"Dominant bottom line: {(bottom_pt1, bottom_pt2)}")
+
+def floodfill_extract_contours(image_gray):
+    """
+    Utilise floodFill pour détecter chaque zone noire connectée,
+    évite les pixels déjà remplis, et retourne les vrais contours.
+    """
+    thresholdToBeAZone = 0.002;
+    contour_area_threshold = thresholdToBeAZone * float(image_gray.shape[0] * image_gray.shape[1])
+
+    img = image_gray.copy()
+    h, w = img.shape
+    contours = []
+
+    # floodFill a besoin d'un masque 2 pixels plus grand
+    mask = np.zeros((h + 2, w + 2), np.uint8)
+
+    for y in range(h):
+        for x in range(w):
+            if img[y, x] == 0:  # pixel noir non traité (car floodFill va peindre en 255)
+                # Reset du masque pour chaque floodFill
+                flood_mask = np.zeros((h + 2, w + 2), np.uint8)
+
+                # Appliquer floodFill : il modifie img en place
+                cv2.floodFill(img, flood_mask, seedPoint=(x, y), newVal=255)
+
+                # Extraire la zone peinte (flood_mask = 1 où rempli)
+                filled_area = (flood_mask[1:-1, 1:-1] == 1).astype(np.uint8) * 255
+                surface_pixels = cv2.countNonZero(filled_area)
+                if surface_pixels > contour_area_threshold:
+                    if (not filled_area_touche_haut(filled_area) and not filled_area_touche_bas(filled_area)):
+                        cnts, _ = cv2.findContours(filled_area, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+                        contours.extend(cnts)
+
+    return contours
+
+def filled_area_touche_haut(filled_area):
+    return np.any(filled_area[0] == 255)
+
+
+def filled_area_touche_bas(filled_area):
+    return np.any(filled_area[-1] == 255)
