@@ -172,8 +172,8 @@ def drawFile(path, image, edges, dilatation, mode):
     done = 0
 
     for idx, cnt in enumerate(toto):
-        parents = contours_inclusion.get(idx, [])
-        if parents:
+        parents = contours_inclusion[idx]
+        if len(parents) > 0:
             print(
                 "Contour %d ignoré car entièrement inclus dans %s." % (idx, parents)
             )

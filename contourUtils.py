@@ -10,7 +10,13 @@ def contour_area(contour):
     area = cv2.contourArea(contour)
     return float(abs(area))
 
+def _extract_xy(vertex):
+    """Convertit un sommet de contour OpenCV en tuple ``(x, y)`` flottant."""
 
+    flat = np.asarray(vertex, dtype=float).reshape(-1)
+    if flat.size < 2:
+        raise ValueError("Vertex does not contain two coordinates")
+    return float(flat[0]), float(flat[1])
 
 def checkContoursIndide(contours):
     """Log l'appartenance d'un contour à un autre dans la même liste.
@@ -30,24 +36,18 @@ def checkContoursIndide(contours):
             print(f"Contour {idx} est vide ou non défini.")
             continue
 
-        # Calcul d'un point de test : centroïde si disponible, sinon premier point
-        moments = cv2.moments(contour)
-        if moments["m00"] != 0:
-            point = (
-                int(moments["m10"] / moments["m00"]),
-                int(moments["m01"] / moments["m00"]),
-            )
-        else:
-            point = tuple(contour[0][0])
-
         parents = []
         for other_idx, other in enumerate(contours):
             if other_idx == idx or other is None or len(other) == 0:
                 continue
 
             # pointPolygonTest retourne > 0 si point à l'intérieur, 0 sur le bord
-            # et < 0 si à l'extérieur. On accepte l'intérieur ou sur le bord.
-            if cv2.pointPolygonTest(other, point, False) >= 0:
+            # et < 0 si à l'extérieur. On exige que l'intégralité du contour soit
+            # incluse : chaque point doit être à l'intérieur ou sur le bord.
+            if all(
+                cv2.pointPolygonTest(other, _extract_xy(pt), False) >= 0
+                for pt in contour
+            ):
                 parents.append(other_idx)
 
         if parents:
