@@ -10,7 +10,7 @@ from PIL import Image, ImageFilter
 from typing import List, Tuple
 from perpspectiveoverlay import project_texture
 from webercolor.contourUtils import checkContoursIndide, contour_area, build_contour_mask, dilate_contour, \
-    findPointsFromContour, findPointsFromContour2, checkContoursIndide2
+    findPointsFromContour, findPointsFromContour2
 from webercolor.imageUtils import floodfill_extract_contours, boostimagegray
 from webercolor.quadri import quadrilateral_from_lines, quadrilateral_from_lines2
 
@@ -167,7 +167,7 @@ def drawFile(path, image, edges, dilatation, mode):
         #"enduit1": cv2.resize(cv2.imread("../webercolor/textures/enduit1.jpg"), (0, 0), fx=0.05, fy=0.05),
     }
     textures = list(textures_files.values())
-    contours_inclusion = checkContoursIndide2(toto)
+    contours_inclusion = checkContoursIndide(toto)
     print(f"contours_inclusion, {contours_inclusion}")
     done = 0
 
