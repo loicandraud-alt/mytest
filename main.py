@@ -156,6 +156,9 @@ def drawFile(path, image, edges, dilatation, mode):
     points_overlay = image.copy()
     approx_overlay = image.copy()
 
+    image_total_area = float(image.shape[0] * image.shape[1])
+    contour_area_threshold = 0.002 * image_total_area
+
     # Charger et préparer les textures
     textures_files = {
         "brique": cv2.resize(cv2.imread("../webercolor/textures/brique.jpg"), (0, 0), fx=0.5, fy=0.5),
@@ -172,7 +175,7 @@ def drawFile(path, image, edges, dilatation, mode):
     done = 0
 
     for idx, cnt in enumerate(toto):
-        parents = contours_inclusion[idx]
+        parents = contours_inclusion[idx][1]
         if len(parents) > 0:
             print(
                 "Contour %d ignoré car entièrement inclus dans %s." % (idx, parents)
@@ -180,8 +183,13 @@ def drawFile(path, image, edges, dilatation, mode):
             continue
 
         area = contour_area(cnt)
-        if (area < 10000):
-            print(f"Contour bypassed because too small, {area}")
+        if area < contour_area_threshold:
+            print(
+                "Contour bypassed because too small (%.2f < %.2f)" % (
+                    area,
+                    contour_area_threshold,
+                )
+            )
             continue
 
         if done >= 100:
@@ -306,7 +314,7 @@ def drawFile(path, image, edges, dilatation, mode):
 # --- SCRIPT PRINCIPAL ---
 #mypath = 'building10.jpg'
 paths = ['building10.jpg','building9.jpg','building7.jpg','building5.jpg','building4.jpg','building2.jpg']
-paths = ['building7.jpg']
+#paths = ['building7.jpg']
 
 #img = cv2.imread(mypath)
 #if img is None:
