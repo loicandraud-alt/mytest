@@ -10,7 +10,7 @@ from PIL import Image, ImageFilter
 from typing import List, Tuple
 from perpspectiveoverlay import project_texture
 from webercolor.contourUtils import checkContoursIndide, contour_area, build_contour_mask, dilate_contour, \
-    findPointsFromContour, findPointsFromContour2
+    findPointsFromContour, findPointsFromContour2, checkContoursIndide2
 from webercolor.imageUtils import floodfill_extract_contours, boostimagegray
 from webercolor.quadri import quadrilateral_from_lines, quadrilateral_from_lines2
 
@@ -167,18 +167,26 @@ def drawFile(path, image, edges, dilatation, mode):
         #"enduit1": cv2.resize(cv2.imread("../webercolor/textures/enduit1.jpg"), (0, 0), fx=0.05, fy=0.05),
     }
     textures = list(textures_files.values())
-    checkContoursIndide(toto)
+    contours_inclusion = checkContoursIndide2(toto)
+    print(f"contours_inclusion, {contours_inclusion}")
     done = 0
 
-    for cnt in toto:
-        if done > 100:
+    for idx, cnt in enumerate(toto):
+        parents = contours_inclusion.get(idx, [])
+        if parents:
+            print(
+                "Contour %d ignoré car entièrement inclus dans %s." % (idx, parents)
+            )
             continue
-        done = done + 1
 
         area = contour_area(cnt)
         if (area < 10000):
             print(f"Contour bypassed because too small, {area}")
             continue
+
+        if done >= 100:
+            break
+        done += 1
 
         #1. Obtenir l'angle et prendre son opposé pour la correction␊
         #angle = findAngle2(cnt)
@@ -268,9 +276,29 @@ def drawFile(path, image, edges, dilatation, mode):
     cv2.imwrite(path + "3_approx_debug.jpg", approx_overlay)
 
     # Dessin des zones colorées pour visualisation
-    for cnt in toto:
+    for contour_index, cnt in enumerate(toto):
         random_color = tuple(np.random.randint(0, 256, size=3).tolist())
         cv2.drawContours(color_zones, [cnt], -1, random_color, thickness=cv2.FILLED)
+
+        moments = cv2.moments(cnt)
+        if moments["m00"] != 0:
+            center_x = int(moments["m10"] / moments["m00"])
+            center_y = int(moments["m01"] / moments["m00"])
+        else:
+            x, y, w, h = cv2.boundingRect(cnt)
+            center_x = x + w // 2
+            center_y = y + h // 2
+
+        cv2.putText(
+            color_zones,
+            str(contour_index),
+            (center_x, center_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (255, 255, 255),
+            2,
+            lineType=cv2.LINE_AA,
+        )
 
     return color_zones, myedgesdilatated
 
@@ -278,6 +306,8 @@ def drawFile(path, image, edges, dilatation, mode):
 # --- SCRIPT PRINCIPAL ---
 #mypath = 'building10.jpg'
 paths = ['building10.jpg','building9.jpg','building7.jpg','building5.jpg','building4.jpg','building2.jpg']
+paths = ['building7.jpg']
+
 #img = cv2.imread(mypath)
 #if img is None:
 #    print(f"Erreur: Impossible de charger l'image depuis {mypath}")

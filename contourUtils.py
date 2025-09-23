@@ -10,7 +10,53 @@ def contour_area(contour):
     area = cv2.contourArea(contour)
     return float(abs(area))
 
+def checkContoursIndide2(contours):
+    """Détecte les inclusions entre contours et les journalise.
 
+    Pour chaque contour, on tente de récupérer un point représentatif (le
+    centroïde si possible) et on vérifie si ce point est situé à l'intérieur
+    d'un ou plusieurs autres contours de la liste. Les informations sont
+    affichées via ``print``. Un dictionnaire ``{index: [parents...]}`` est
+    retourné afin de pouvoir exclure les contours inclus dans d'autres lors des
+    traitements ultérieurs (par exemple l'application d'une texture).
+    """
+
+    inclusion_map = {}
+
+    for idx, contour in enumerate(contours):
+        if contour is None or len(contour) == 0:
+            inclusion_map[idx] = []
+            print(f"Contour {idx} est vide ou non défini.")
+            continue
+
+        # Calcul d'un point de test : centroïde si disponible, sinon premier point
+        moments = cv2.moments(contour)
+        if moments["m00"] != 0:
+            point = (
+                int(moments["m10"] / moments["m00"]),
+                int(moments["m01"] / moments["m00"]),
+            )
+        else:
+            point = tuple(contour[0][0])
+
+        parents = []
+        for other_idx, other in enumerate(contours):
+            if other_idx == idx or other is None or len(other) == 0:
+                continue
+
+            # pointPolygonTest retourne > 0 si point à l'intérieur, 0 sur le bord
+            # et < 0 si à l'extérieur. On accepte l'intérieur ou sur le bord.
+            if cv2.pointPolygonTest(other, point, False) >= 0:
+                parents.append(other_idx)
+
+        if parents:
+            print(f"Contour {idx} est entouré par les contours {parents}.")
+        else:
+            print(f"Contour {idx} n'est entouré par aucun autre contour.")
+
+        inclusion_map[idx] = parents
+
+    return inclusion_map
 
 def checkContoursIndide(contours):
     """Log l'appartenance d'un contour à un autre dans la même liste.
