@@ -10,9 +10,9 @@ from PIL import Image, ImageFilter
 from typing import List, Tuple
 from perpspectiveoverlay import project_texture
 from webercolor.contourUtils import checkContoursIndide, contour_area, build_contour_mask, dilate_contour, \
-    findPointsFromContour
+    findPointsFromContour, findPointsFromContour2
 from webercolor.imageUtils import floodfill_extract_contours, boostimagegray
-from webercolor.quadri import quadrilateral_from_lines
+from webercolor.quadri import quadrilateral_from_lines, quadrilateral_from_lines2
 
 
 def maxlength(approx):
@@ -193,7 +193,15 @@ def drawFile(path, image, edges, dilatation, mode):
             try:
                 line1 = ((float(pt11[0]), float(pt11[1])), (float(pt12[0]), float(pt12[1])))
                 line2 = ((float(pt21[0]), float(pt21[1])), (float(pt22[0]), float(pt22[1])))
-                quadrilateral_points = quadrilateral_from_lines(line1, line2)
+                quadrilateral_points = quadrilateral_from_lines2(line1, line2)
+                contour_x = cnt[:, 0, 0]
+                min_x = float(np.min(contour_x))
+                max_x = float(np.max(contour_x))
+                quadrilateral_points = quadrilateral_from_lines2(
+                    line1,
+                    line2,
+                    x_bounds=(min_x, max_x),
+                )
             except ValueError:
                 quadrilateral_points = None
             if quadrilateral_points:

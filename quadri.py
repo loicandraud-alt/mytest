@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Tuple
 from typing import List
+from typing import List, Tuple, Optional
 import math
 import numpy as np
 
@@ -46,6 +47,67 @@ def quadrilateral_from_lines(line1: Line, line2: Line, extension_factor: float =
 
     min_x = min(longest_line[0][0], longest_line[1][0])
     max_x = max(longest_line[0][0], longest_line[1][0])
+
+    extended_line1 = _extend_line(line1, extension_factor)
+    extended_line2 = _extend_line(line2, extension_factor)
+
+    slope1, intercept1 = _line_parameters(extended_line1)
+    slope2, intercept2 = _line_parameters(extended_line2)
+
+    left_points = [
+        (min_x, slope1 * min_x + intercept1),
+        (min_x, slope2 * min_x + intercept2),
+    ]
+    right_points = [
+        (max_x, slope1 * max_x + intercept1),
+        (max_x, slope2 * max_x + intercept2),
+    ]
+
+    left_points.sort(key=lambda pt: pt[1])
+    right_points.sort(key=lambda pt: pt[1])
+
+    top_left, bottom_left = left_points
+    top_right, bottom_right = right_points
+
+    return [top_left, bottom_left, bottom_right, top_right]
+
+def quadrilateral_from_lines2(
+    line1: Line,
+    line2: Line,
+    extension_factor: float = 100.0,
+    x_bounds: Optional[Tuple[float, float]] = None,
+) -> List[Point]:
+    """Construit le quadrilatère délimité par deux lignes inclinées et deux droites verticales.
+
+    Args:
+        line1: Premier segment (non vertical) défini par deux points (x, y).
+        line2: Second segment (non vertical) défini par deux points (x, y).
+        extension_factor: Facteur d'allongement appliqué à chaque segment.
+
+    Returns:
+        Les quatre sommets du quadrilatère dans l'ordre suivant :
+        haut-gauche, bas-gauche, bas-droite, haut-droite.
+
+    Raises:
+        ValueError: si une ligne est verticale, dégénérée ou si le facteur est invalide.
+    """
+    _validate_line(line1)
+    _validate_line(line2)
+
+    if extension_factor <= 0:
+        raise ValueError("Le facteur d'extension doit être strictement positif.")
+
+    if x_bounds is not None:
+        min_x, max_x = x_bounds
+        if min_x > max_x + _EPSILON:
+            raise ValueError("min_x doit être inférieur ou égal à max_x.")
+    else:
+        length1 = _segment_length(line1)
+        length2 = _segment_length(line2)
+        longest_line = line1 if length1 >= length2 else line2
+
+        min_x = min(longest_line[0][0], longest_line[1][0])
+        max_x = max(longest_line[0][0], longest_line[1][0])
 
     extended_line1 = _extend_line(line1, extension_factor)
     extended_line2 = _extend_line(line2, extension_factor)

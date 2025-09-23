@@ -111,6 +111,7 @@ def findPointsFromContour(cnt):
     """
     epsilon = 0.002 * cv2.arcLength(cnt, True)
     approx = cv2.approxPolyDP(cnt, epsilon, True)
+    approx = cv2.convexHull(approx)
     #approx = cnt
 
     if len(approx) < 2:
@@ -161,3 +162,83 @@ def findPointsFromContour(cnt):
 
     return (outpt11_, outpt12_, outpt21, outpt22), approx
 
+def findPointsFromContour2(cnt):
+    """Retourne les lignes dominantes supérieure et inférieure d'un contour.
+
+    Cette variante regroupe les segments horizontaux non verticaux détectés en
+    deux familles : ceux situés dans la partie supérieure du contour et ceux
+    dans la partie inférieure. Pour chaque famille, une ligne « dominante » est
+    calculée en faisant la moyenne pondérée (par la longueur de chaque segment)
+    des extrémités correspondantes.
+
+    Returns:
+        Tuple[(Tuple[Tuple[int, int], ...] | None), np.ndarray]:
+            - Les quatre points définissant les lignes dominante supérieure puis
+              inférieure (ou ``None`` si une des deux lignes ne peut être
+              déterminée).
+            - Le polygone approché « approx » (tableau de points OpenCV).
+    """
+
+    epsilon = 0.002 * cv2.arcLength(cnt, True)
+    approx = cv2.approxPolyDP(cnt, epsilon, True)
+
+    if len(approx) < 2:
+        return None, approx
+
+    segments = []
+    for i in range(len(approx)):
+        pt1 = approx[i][0]
+        pt2 = approx[(i + 1) % len(approx)][0]
+        dx = pt2[0] - pt1[0]
+        dy = pt2[1] - pt1[1]
+        length = math.hypot(dx, dy)
+        angle_deg = math.degrees(math.atan2(dy, dx))
+        angle_deg = -angle_deg % 180
+        if angle_deg < 80 or angle_deg > 100:
+            if abs(dx) > 20:
+                avg_height = (pt1[1] + pt2[1]) / 2.0
+                segments.append((length, avg_height, pt1, pt2))
+
+    if not segments:
+        return None, approx
+
+    ys = [pt[0][1] for pt in approx]
+    top_y = min(ys)
+    bottom_y = max(ys)
+    mid_y = (top_y + bottom_y) / 2.0
+    upper_limit = (top_y + mid_y) / 2.0
+    lower_limit = (bottom_y + mid_y) / 2.0
+
+    def dominant_line(filter_fn):
+        filtered = [seg for seg in segments if filter_fn(seg)]
+        total_length = sum(seg[0] for seg in filtered)
+        if total_length <= 0:
+            return None
+
+        left_sum = np.zeros(2, dtype=float)
+        right_sum = np.zeros(2, dtype=float)
+        for length, _, pt1, pt2 in filtered:
+            if pt1[0] < pt2[0] or (pt1[0] == pt2[0] and pt1[1] <= pt2[1]):
+                left_pt, right_pt = pt1, pt2
+            else:
+                left_pt, right_pt = pt2, pt1
+            left_sum += length * np.array(left_pt, dtype=float)
+            right_sum += length * np.array(right_pt, dtype=float)
+
+        left_pt = tuple(int(round(coord)) for coord in (left_sum / total_length))
+        right_pt = tuple(int(round(coord)) for coord in (right_sum / total_length))
+        return left_pt, right_pt
+
+    top_line = dominant_line(lambda seg: seg[1] <= upper_limit)
+    bottom_line = dominant_line(lambda seg: seg[1] >= lower_limit)
+
+    if not top_line or not bottom_line:
+        return None, approx
+
+    top_pt1, top_pt2 = top_line
+    bottom_pt1, bottom_pt2 = bottom_line
+
+    print(f"Dominant top line: {(top_pt1, top_pt2)}")
+    print(f"Dominant bottom line: {(bottom_pt1, bottom_pt2)}")
+
+    return (top_pt1, top_pt2, bottom_pt1, bottom_pt2), approx
