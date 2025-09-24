@@ -8,6 +8,7 @@ from perpspectiveoverlay import project_texture
 from webercolor.contourUtils import checkContoursIndide, contour_area, build_contour_mask, dilate_contour, \
     findPointsFromContour, findPointsFromContour2
 from webercolor.contourUtils import floodfill_extract_contours
+from webercolor.iii import detect_largest_hollow_parallelepiped
 from webercolor.imageUtils import boostimagegray
 from webercolor.quadri import quadrilateral_from_lines
 
@@ -185,6 +186,7 @@ def process_contours(image, contours, textures):
             break
         done += 1
 
+        largest = detect_largest_hollow_parallelepiped(cnt)
         points, approx = findPointsFromContour(cnt)
         quadrilateral_points = None
         if approx is not None and len(approx) >= 2:
@@ -301,19 +303,20 @@ def drawFile(path, dilatation, mode):
 # --- SCRIPT PRINCIPAL ---
 
 paths = [
-    'building16.jpg',
-    'building15.jpg',
-    'building14.jpg',
-    'building13.jpg',
-    'building12.jpg',
-    'building11.jpg',
+    #'building16.jpg',
+    #'building15.jpg',
+    #'building14.jpg',
+    #'building13.jpg',
+    #'building12.jpg',
+    #'building11.jpg',
 
-    'building10.jpg',
-    'building9.jpg',
-    'building7.jpg',
-    'building5.jpg',
-    'building4.jpg',
-    'building2.jpg']
+    #'building10.jpg',
+    'building9.jpg'
+    #"'building7.jpg',
+    #'building5.jpg',
+    #'building4.jpg',
+    #'building2.jpg']
+    ]
 #paths = ['building5.jpg']
 for path in paths:
     drawFile('images/' + path, 4, cv2.RETR_CCOMP)
