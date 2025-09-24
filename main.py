@@ -195,8 +195,8 @@ def process_contours(image, contours, textures):
         if done >= 100:
             break
         done += 1
-
-        largest = detect_largest_hollow_parallelepiped(cnt)
+        quad_rects = []
+        largest, quad_rects = detect_largest_hollow_parallelepiped(cnt)
         if largest:
             box = np.int32(np.round(largest["box"]))
             cv2.drawContours(hollow_overlay, [box], -1, (0, 255, 255), thickness=3)

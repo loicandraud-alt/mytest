@@ -89,7 +89,7 @@ def detect_largest_hollow_parallelepiped(contour, image_shape=None, min_area=0.0
     best_candidate = None
     best_area = min_area
     candidates = []
-
+    quad_rects = []
     for diff_cnt in diff_contours:
         if len(diff_cnt) < 3:
             continue
@@ -104,7 +104,11 @@ def detect_largest_hollow_parallelepiped(contour, image_shape=None, min_area=0.0
 
         quad_global = quad_local + offset.astype(np.float32)
 
+        vertical_height = float(np.max(quad_global[:, 1]) - np.min(quad_global[:, 1]))
+        print(f"Hauteur verticale maximale du quadrilatère : {vertical_height:.2f}")
+
         quad_rect = cv2.minAreaRect(quad_local.reshape(-1, 1, 2).astype(np.float32))
+        quad_rects.append(quad_rect)
         (cx, cy), (w, h), angle = quad_rect
 
         offset_vec = offset.reshape(1, 1, 2)
@@ -134,7 +138,7 @@ def detect_largest_hollow_parallelepiped(contour, image_shape=None, min_area=0.0
 
     enriched_candidate = dict(best_candidate)
     enriched_candidate["all_candidates"] = candidates
-    return enriched_candidate
+    return enriched_candidate, quad_rects
 
 def _largest_inscribed_quadrilateral(diff_cnt: np.ndarray, diff_mask: np.ndarray) -> Optional[np.ndarray]:
         """Cherche le quadrilatère de plus grande aire contenu dans ``diff_cnt``."""
