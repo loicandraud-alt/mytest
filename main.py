@@ -9,7 +9,7 @@ from webercolor.contourUtils import checkContoursIndide, contour_area, build_con
     findPointsFromContour, findPointsFromContour2
 from webercolor.contourUtils import floodfill_extract_contours
 from webercolor.imageUtils import boostimagegray
-from webercolor.quadri import quadrilateral_from_lines, quadrilateral_from_lines2
+from webercolor.quadri import quadrilateral_from_lines
 
 
 def maxlength(approx):
@@ -196,11 +196,11 @@ def process_contours(image, contours, textures):
             try:
                 line1 = ((float(pt11[0]), float(pt11[1])), (float(pt12[0]), float(pt12[1])))
                 line2 = ((float(pt21[0]), float(pt21[1])), (float(pt22[0]), float(pt22[1])))
-                quadrilateral_points = quadrilateral_from_lines2(line1, line2)
+                quadrilateral_points = quadrilateral_from_lines(line1, line2)
                 contour_x = cnt[:, 0, 0]
                 min_x = float(np.min(contour_x))
                 max_x = float(np.max(contour_x))
-                quadrilateral_points = quadrilateral_from_lines2(line1, line2, x_bounds=(min_x, max_x))
+                quadrilateral_points = quadrilateral_from_lines(line1, line2)
             except ValueError:
                 quadrilateral_points = None
             if quadrilateral_points:
