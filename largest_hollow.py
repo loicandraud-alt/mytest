@@ -107,26 +107,29 @@ def detect_largest_hollow_parallelepiped(contour, image_shape=None, min_area=0.0
         vertical_height = float(np.max(quad_global[:, 1]) - np.min(quad_global[:, 1]))
         print(f"Hauteur verticale maximale du quadrilatère : {vertical_height:.2f}")
 
-
-        (cx, cy), (w, h), angle = quad_rect
+        quad_rect_local = cv2.minAreaRect(quad_local.reshape(-1, 1, 2))
+        (cx, cy), (w, h), angle = quad_rect_local
 
         offset_vec = offset.reshape(1, 1, 2)
         diff_cnt_global = diff_cnt + offset_vec.astype(diff_cnt.dtype)
         diff_cnt_global = diff_cnt_global.astype(np.int32)
 
+        quad_rect_global = (
+            (float(cx) + float(offset[0, 0]), float(cy) + float(offset[0, 1])),
+            (float(w), float(h)),
+            float(angle),
+        )
+
         candidate = {
             "box": quad_global,
             "area": area,
-            "rect": (
-                (float(cx) + float(offset[0, 0]), float(cy) + float(offset[0, 1])),
-                (float(w), float(h)),
-                float(angle),
-            ),
+            "rect": quad_rect_global,
             "size": (float(w), float(h)),
             "angle": float(angle),
             "diff_contour": diff_cnt_global,
         }
         candidates.append(candidate)
+        quad_rects.append(quad_rect_global)
 
         if area > best_area:
             best_candidate = candidate
@@ -134,8 +137,7 @@ def detect_largest_hollow_parallelepiped(contour, image_shape=None, min_area=0.0
 
     if best_candidate is None:
         return None
-    quad_rect = cv2.minAreaRect(best_candidate.reshape(-1, 1, 2).astype(np.float32))
-    quad_rects.append(quad_rect)
+
     enriched_candidate = dict(best_candidate)
     enriched_candidate["all_candidates"] = candidates
     return enriched_candidate, quad_rects
