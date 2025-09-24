@@ -5,8 +5,16 @@ import random
 import math
 
 from perpspectiveoverlay import project_texture
-from webercolor.contourUtils import checkContoursIndide, contour_area, build_contour_mask, dilate_contour, \
-    findPointsFromContour, findPointsFromContour2
+from webercolor.contourUtils import (
+    checkContoursIndide,
+    contour_area,
+    build_contour_mask,
+    dilate_contour,
+    findPointsFromContour,
+    findPointsFromContour2,
+    find_concavities,
+    largest_quadrilateral_in_concavity,
+)
 from webercolor.contourUtils import floodfill_extract_contours
 from webercolor.largest_hollow import detect_largest_hollow_parallelepiped
 from webercolor.imageUtils import boostimagegray
@@ -173,6 +181,7 @@ def load_textures():
 def process_contours(image, contours, textures):
     textured_image, background_with_quads, points_overlay, approx_overlay = initialize_overlays(image)
     hollow_overlay = image.copy()
+    concavity_overlay = image.copy()
     contours_inclusion = checkContoursIndide(contours)
     print(f"contours_inclusion, {contours_inclusion}")
     done = 0
@@ -217,6 +226,20 @@ def process_contours(image, contours, textures):
                 thickness=1,
                 lineType=cv2.LINE_AA,
             )
+        concavities = find_concavities(cnt)
+
+        for concavity in concavities:
+            if concavity is None or len(concavity) < 3:
+                continue
+
+            cv2.polylines(concavity_overlay, [concavity], isClosed=True, color=(0, 255, 255), thickness=2)
+            quad = largest_quadrilateral_in_concavity(concavity)
+            if quad is None:
+                continue
+
+            quad_int = np.int32(np.round(quad))
+            cv2.polylines(concavity_overlay, [quad_int], isClosed=True, color=(0, 0, 255), thickness=2)
+
         points, approx = findPointsFromContour(cnt)
 
         quadrilateral_points = None
@@ -280,7 +303,14 @@ def process_contours(image, contours, textures):
         roi_bg_masked = cv2.bitwise_and(roi_bg, roi_bg, mask=cv2.bitwise_not(mask))
         textured_image[y:y + h, x:x + w] = cv2.add(roi_bg_masked, textured_region)
 
-    return textured_image, background_with_quads, points_overlay, approx_overlay, hollow_overlay
+    return (
+        textured_image,
+        background_with_quads,
+        points_overlay,
+        approx_overlay,
+        hollow_overlay,
+        concavity_overlay,
+    )
 
 
 def build_color_zones(image_shape, contours):
@@ -317,7 +347,14 @@ def drawFile(path, dilatation, mode):
     image, edges_dilated = preprocess_image(path, dilatation)
     contours = floodfill_extract_contours(edges_dilated)
     textures = load_textures()
-    textured_image, background_with_quads, points_overlay, approx_overlay, hollow_overlay = process_contours(
+    (
+        textured_image,
+        background_with_quads,
+        points_overlay,
+        approx_overlay,
+        hollow_overlay,
+        concavity_overlay,
+    ) = process_contours(
         image,
         contours,
         textures,
@@ -328,6 +365,7 @@ def drawFile(path, dilatation, mode):
     cv2.imwrite(path + "5_background_quadrilaterals.jpg", background_with_quads)
     cv2.imwrite(path + "4_points_debug.jpg", points_overlay)
     cv2.imwrite(path + "3_approx_hull.jpg", approx_overlay)
+    cv2.imwrite(path + "8_concavities.jpg", concavity_overlay)
     cv2.imwrite(path + "2CCOMP_color_zones.jpg", color_zones)
     return color_zones, edges_dilated
 

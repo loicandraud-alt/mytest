@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import math
+from typing import List, Optional
 
 def contour_area(contour):
     """Calcule et retourne l'aire (valeur positive) d'un contour."""
@@ -161,6 +162,294 @@ def findPointsFromContour(cnt):
     print(f"Line 2: {outpt21, outpt22}")
 
     return (outpt11_, outpt12_, outpt21, outpt22), approx
+
+
+def _contour_segment(contour: np.ndarray, start_idx: int, end_idx: int) -> np.ndarray:
+    """Return the sub-contour from ``start_idx`` to ``end_idx`` inclusive."""
+
+    if contour is None or len(contour) == 0:
+        return np.empty((0, 1, 2), dtype=np.int32)
+
+    contour = np.asarray(contour, dtype=np.int32)
+    n = len(contour)
+    if n == 0:
+        return np.empty((0, 1, 2), dtype=np.int32)
+
+    segment_points = []
+    idx = start_idx % n
+    end_idx = end_idx % n
+
+    while True:
+        segment_points.append(contour[idx][0])
+        if idx == end_idx:
+            break
+        idx = (idx + 1) % n
+        if idx == start_idx:
+            break
+
+    if len(segment_points) < 3:
+        return np.empty((0, 1, 2), dtype=np.int32)
+
+    return np.asarray(segment_points, dtype=np.int32).reshape((-1, 1, 2))
+
+
+def find_concavities(
+    contour: np.ndarray,
+    min_depth: float = 5.0,
+    min_area: float = 25.0,
+) -> List[np.ndarray]:
+    """Identify the concave regions of ``contour`` as individual polygons."""
+
+    if contour is None or len(contour) < 4:
+        return []
+
+    contour = np.asarray(contour, dtype=np.int32)
+    hull_indices = cv2.convexHull(contour, returnPoints=False)
+    if hull_indices is None or len(hull_indices) < 3:
+        return []
+
+    defects = cv2.convexityDefects(contour, hull_indices)
+    if defects is None:
+        return []
+
+    concavities = []
+    depth_threshold = max(0.0, float(min_depth)) * 256.0
+
+    for start_idx, end_idx, far_idx, depth in defects[:, 0]:
+        if depth < depth_threshold:
+            continue
+
+        segment = _contour_segment(contour, int(start_idx), int(end_idx))
+        if segment.size == 0:
+            continue
+
+        farthest_point = contour[int(far_idx) % len(contour)][0]
+        if not any(np.array_equal(pt[0], farthest_point) for pt in segment):
+            segment = np.vstack((segment, np.array([[farthest_point]], dtype=np.int32)))
+
+        area = abs(cv2.contourArea(segment))
+        if area < float(min_area):
+            continue
+
+        concavities.append(segment)
+
+    return concavities
+
+
+def _resample_concavity_vertices(
+    concavity: np.ndarray,
+    max_vertices: int = 24,
+    step: float = 8.0,
+) -> np.ndarray:
+    """Simplify and densify ``concavity`` to obtain candidate vertices."""
+
+    if concavity is None:
+        return np.empty((0, 2), dtype=np.float32)
+
+    contour = np.asarray(concavity, dtype=np.float32).reshape((-1, 1, 2))
+    if len(contour) == 0:
+        return np.empty((0, 2), dtype=np.float32)
+
+    perimeter = max(cv2.arcLength(contour, True), 1.0)
+    epsilon = 0.01 * perimeter
+    approx = cv2.approxPolyDP(contour, epsilon, True)
+    if len(approx) < 4:
+        approx = contour
+
+    points = approx.reshape((-1, 2)).astype(np.float32)
+    densified: List[np.ndarray] = []
+    num_points = len(points)
+    if num_points == 0:
+        return np.empty((0, 2), dtype=np.float32)
+
+    for idx in range(num_points):
+        p1 = points[idx]
+        p2 = points[(idx + 1) % num_points]
+        densified.append(p1)
+        dist = float(np.linalg.norm(p2 - p1))
+        if dist <= step:
+            continue
+        subdivisions = int(dist // step)
+        for sub_idx in range(1, subdivisions + 1):
+            t = sub_idx / (subdivisions + 1)
+            intermediate = (1.0 - t) * p1 + t * p2
+            densified.append(intermediate.astype(np.float32))
+
+    if len(densified) > max_vertices:
+        indices = np.linspace(0, len(densified) - 1, num=max_vertices, dtype=int)
+        densified = [densified[i] for i in indices]
+
+    unique_points: List[np.ndarray] = []
+    for pt in densified:
+        if not unique_points:
+            unique_points.append(pt)
+            continue
+        if np.linalg.norm(pt - unique_points[-1]) > 1e-3:
+            unique_points.append(pt)
+
+    return np.asarray(unique_points, dtype=np.float32)
+
+
+def _polygon_area(points: np.ndarray) -> float:
+    area = 0.0
+    pts = np.asarray(points, dtype=np.float32)
+    if len(pts) < 3:
+        return 0.0
+    for idx in range(len(pts)):
+        x1, y1 = pts[idx]
+        x2, y2 = pts[(idx + 1) % len(pts)]
+        area += x1 * y2 - x2 * y1
+    return abs(area) * 0.5
+
+
+def _is_convex_quad(quad: np.ndarray) -> bool:
+    pts = np.asarray(quad, dtype=np.float32)
+    if len(pts) != 4:
+        return False
+
+    cross_sign = 0.0
+    for idx in range(4):
+        a = pts[idx]
+        b = pts[(idx + 1) % 4]
+        c = pts[(idx + 2) % 4]
+        ab = b - a
+        bc = c - b
+        cross = ab[0] * bc[1] - ab[1] * bc[0]
+        if abs(cross) < 1e-6:
+            continue
+        current_sign = math.copysign(1.0, cross)
+        if cross_sign == 0.0:
+            cross_sign = current_sign
+        elif current_sign != cross_sign:
+            return False
+    return _polygon_area(pts) > 1e-3
+
+
+def _points_inside_contour(points: List[np.ndarray], contour: np.ndarray) -> bool:
+    contour_for_test = np.asarray(contour, dtype=np.float32).reshape((-1, 1, 2))
+    for pt in points:
+        if cv2.pointPolygonTest(
+            contour_for_test, (float(pt[0]), float(pt[1])), False
+        ) < -1e-3:
+            return False
+    return True
+
+
+def _orientation(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
+    ab = b - a
+    ac = c - a
+    return float(ab[0] * ac[1] - ab[1] * ac[0])
+
+
+def _segments_properly_intersect(
+    p1: np.ndarray, p2: np.ndarray, q1: np.ndarray, q2: np.ndarray, eps: float = 1e-5
+) -> bool:
+    o1 = _orientation(p1, p2, q1)
+    o2 = _orientation(p1, p2, q2)
+    o3 = _orientation(q1, q2, p1)
+    o4 = _orientation(q1, q2, p2)
+
+    if (
+        ((o1 > eps and o2 < -eps) or (o1 < -eps and o2 > eps))
+        and ((o3 > eps and o4 < -eps) or (o3 < -eps and o4 > eps))
+    ):
+        return True
+
+    return False
+
+
+def _quad_within_concavity(quad: np.ndarray, concavity: np.ndarray) -> bool:
+    pts = [np.asarray(p, dtype=np.float32) for p in quad]
+    if not _points_inside_contour(pts, concavity):
+        return False
+
+    concavity_points = np.asarray(concavity, dtype=np.float32).reshape((-1, 2))
+    num_concavity_pts = len(concavity_points)
+    if num_concavity_pts >= 2:
+        for idx in range(4):
+            p1 = pts[idx]
+            p2 = pts[(idx + 1) % 4]
+            for jdx in range(num_concavity_pts):
+                q1 = concavity_points[jdx]
+                q2 = concavity_points[(jdx + 1) % num_concavity_pts]
+                if _segments_properly_intersect(p1, p2, q1, q2):
+                    return False
+
+    for idx in range(4):
+        edge_start = pts[idx]
+        edge_end = pts[(idx + 1) % 4]
+        for t in (0.25, 0.5, 0.75):
+            sample = (1.0 - t) * edge_start + t * edge_end
+            if cv2.pointPolygonTest(
+                concavity_points.reshape((-1, 1, 2)),
+                (float(sample[0]), float(sample[1])),
+                False,
+            ) < -1e-3:
+                return False
+
+    edges_midpoints = []
+    for idx in range(4):
+        midpoint = 0.5 * (pts[idx] + pts[(idx + 1) % 4])
+        edges_midpoints.append(midpoint)
+
+    centroid = sum(pts) / 4.0
+    triangle_centroids = [
+        (pts[0] + pts[1] + pts[2]) / 3.0,
+        (pts[0] + pts[2] + pts[3]) / 3.0,
+    ]
+
+    return _points_inside_contour(edges_midpoints + [centroid] + triangle_centroids, concavity)
+
+
+def largest_quadrilateral_in_concavity(
+    concavity: np.ndarray,
+    max_vertices: int = 24,
+    sampling_step: float = 8.0,
+) -> Optional[np.ndarray]:
+    """Approximate the largest quadrilateral fitting inside ``concavity``.
+
+    The quadrilateral vertices are chosen among sampled points lying on the
+    concavity boundary to guarantee the resulting polygon stays fully inside
+    the concave region.
+    """
+
+    if concavity is None or len(concavity) < 4:
+        return None
+
+    candidates = _resample_concavity_vertices(concavity, max_vertices, sampling_step)
+    if len(candidates) < 4:
+        return None
+
+    best_quad: Optional[np.ndarray] = None
+    best_area = 0.0
+
+    num_candidates = len(candidates)
+    for i in range(num_candidates - 3):
+        for j in range(i + 1, num_candidates - 2):
+            for k in range(j + 1, num_candidates - 1):
+                for l in range(k + 1, num_candidates):
+                    quad = np.array(
+                        [
+                            candidates[i],
+                            candidates[j],
+                            candidates[k],
+                            candidates[l],
+                        ],
+                        dtype=np.float32,
+                    )
+
+                    if not _is_convex_quad(quad):
+                        continue
+                    if not _quad_within_concavity(quad, concavity):
+                        continue
+
+                    area = _polygon_area(quad)
+                    if area > best_area:
+                        best_area = area
+                        best_quad = quad.copy()
+
+    return best_quad
+
 
 def findPointsFromContour2(cnt):
     """Retourne les lignes dominantes supérieure et inférieure d'un contour.
