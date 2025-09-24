@@ -107,8 +107,7 @@ def detect_largest_hollow_parallelepiped(contour, image_shape=None, min_area=0.0
         vertical_height = float(np.max(quad_global[:, 1]) - np.min(quad_global[:, 1]))
         print(f"Hauteur verticale maximale du quadrilatère : {vertical_height:.2f}")
 
-        quad_rect = cv2.minAreaRect(quad_local.reshape(-1, 1, 2).astype(np.float32))
-        quad_rects.append(quad_rect)
+
         (cx, cy), (w, h), angle = quad_rect
 
         offset_vec = offset.reshape(1, 1, 2)
@@ -135,7 +134,8 @@ def detect_largest_hollow_parallelepiped(contour, image_shape=None, min_area=0.0
 
     if best_candidate is None:
         return None
-
+    quad_rect = cv2.minAreaRect(best_candidate.reshape(-1, 1, 2).astype(np.float32))
+    quad_rects.append(quad_rect)
     enriched_candidate = dict(best_candidate)
     enriched_candidate["all_candidates"] = candidates
     return enriched_candidate, quad_rects
