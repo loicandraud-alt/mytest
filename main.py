@@ -8,7 +8,7 @@ from perpspectiveoverlay import project_texture
 from webercolor.contourUtils import checkContoursIndide, contour_area, build_contour_mask, dilate_contour, \
     findPointsFromContour, findPointsFromContour2
 from webercolor.contourUtils import floodfill_extract_contours
-from webercolor.iii import detect_largest_hollow_parallelepiped
+from webercolor.largest_hollow import detect_largest_hollow_parallelepiped
 from webercolor.imageUtils import boostimagegray
 from webercolor.quadri import quadrilateral_from_lines
 
