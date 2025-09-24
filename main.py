@@ -172,6 +172,7 @@ def load_textures():
 
 def process_contours(image, contours, textures):
     textured_image, background_with_quads, points_overlay, approx_overlay = initialize_overlays(image)
+    hollow_overlay = image.copy()
     contours_inclusion = checkContoursIndide(contours)
     print(f"contours_inclusion, {contours_inclusion}")
     done = 0
@@ -187,7 +188,37 @@ def process_contours(image, contours, textures):
         done += 1
 
         largest = detect_largest_hollow_parallelepiped(cnt)
+        if largest:
+            box = np.int32(np.round(largest["box"]))
+            cv2.drawContours(hollow_overlay, [box], -1, (0, 255, 255), thickness=3)
+            diff_contour = largest.get("diff_contour")
+            if diff_contour is not None and len(diff_contour) > 0:
+                cv2.drawContours(hollow_overlay, [diff_contour], -1, (255, 0, 255), thickness=2)
+            area_text = f"{int(round(largest['area']))} px²"
+            rect_center = largest["rect"][0]
+            text_position = (int(rect_center[0]), int(rect_center[1]))
+            cv2.putText(
+                hollow_overlay,
+                area_text,
+                text_position,
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 0),
+                thickness=3,
+                lineType=cv2.LINE_AA,
+            )
+            cv2.putText(
+                hollow_overlay,
+                area_text,
+                text_position,
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 255),
+                thickness=1,
+                lineType=cv2.LINE_AA,
+            )
         points, approx = findPointsFromContour(cnt)
+
         quadrilateral_points = None
         if approx is not None and len(approx) >= 2:
             cv2.polylines(approx_overlay, [approx], isClosed=True, color=(0, 255, 0), thickness=3)
@@ -249,7 +280,7 @@ def process_contours(image, contours, textures):
         roi_bg_masked = cv2.bitwise_and(roi_bg, roi_bg, mask=cv2.bitwise_not(mask))
         textured_image[y:y + h, x:x + w] = cv2.add(roi_bg_masked, textured_region)
 
-    return textured_image, background_with_quads, points_overlay, approx_overlay
+    return textured_image, background_with_quads, points_overlay, approx_overlay, hollow_overlay
 
 
 def build_color_zones(image_shape, contours):
@@ -286,12 +317,13 @@ def drawFile(path, dilatation, mode):
     image, edges_dilated = preprocess_image(path, dilatation)
     contours = floodfill_extract_contours(edges_dilated)
     textures = load_textures()
-    textured_image, background_with_quads, points_overlay, approx_overlay = process_contours(
+    textured_image, background_with_quads, points_overlay, approx_overlay, hollow_overlay = process_contours(
         image,
         contours,
         textures,
     )
     color_zones = build_color_zones(image.shape, contours)
+    cv2.imwrite(path + "7_hollow_parallelepipeds.jpg", hollow_overlay)
     cv2.imwrite(path + "6_combined.jpg", textured_image)
     cv2.imwrite(path + "5_background_quadrilaterals.jpg", background_with_quads)
     cv2.imwrite(path + "4_points_debug.jpg", points_overlay)
