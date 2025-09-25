@@ -86,7 +86,12 @@ runButton.addEventListener('click', async () => {
     displayResults(results);
     updateStatus(`Analyse terminée : ${results.length} images générées.`);
   } catch (error) {
-    console.error(error);
+    if (typeof error === 'number' && cv?.exceptionFromPtr) {
+      const cvError = cv.exceptionFromPtr(error);
+      console.error(cvError?.msg || error);
+    } else {
+      console.error(error);
+    }
     updateStatus('Une erreur est survenue pendant le traitement.', 'error');
   } finally {
     runButton.disabled = false;
