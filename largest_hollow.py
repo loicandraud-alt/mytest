@@ -105,6 +105,7 @@ def detect_largest_hollow_parallelepiped(contour, image_shape=None, min_area=0.0
         quad_global = quad_local + offset.astype(np.float32)
 
         vertical_height = float(np.max(quad_global[:, 1]) - np.min(quad_global[:, 1]))
+        vertical_height = _max_vertical_span(quad_global)
         print(f"Hauteur verticale maximale du quadrilatère : {vertical_height:.2f}")
 
         quad_rect_local = cv2.minAreaRect(quad_local.reshape(-1, 1, 2))
@@ -141,6 +142,78 @@ def detect_largest_hollow_parallelepiped(contour, image_shape=None, min_area=0.0
     enriched_candidate = dict(best_candidate)
     enriched_candidate["all_candidates"] = candidates
     return enriched_candidate, quad_rects
+
+def _max_vertical_span(points: np.ndarray) -> float:
+    """Calcule la hauteur maximale d'intersection avec des lignes verticales."""
+
+    if points is None or len(points) < 3:
+        return 0.0
+
+    pts = np.asarray(points, dtype=np.float32)
+    if pts.ndim != 2 or pts.shape[1] != 2:
+        pts = pts.reshape(-1, 2)
+
+    if len(pts) < 3:
+        return 0.0
+
+    x_coords = pts[:, 0]
+    x_min = float(np.min(x_coords))
+    x_max = float(np.max(x_coords))
+    if not math.isfinite(x_min) or not math.isfinite(x_max):
+        return 0.0
+
+    edges = list(zip(pts, np.roll(pts, -1, axis=0)))
+
+    x_samples = set()
+    for x in range(int(math.floor(x_min)), int(math.ceil(x_max)) + 1):
+        x_samples.add(float(x))
+    for x in x_coords:
+        x_samples.add(float(x))
+
+    sorted_x = sorted(x_samples)
+    for idx in range(len(sorted_x) - 1):
+        mid = 0.5 * (sorted_x[idx] + sorted_x[idx + 1])
+        x_samples.add(mid)
+
+    max_span = 0.0
+    eps = 1
+
+    for x0 in sorted(x_samples):
+        if x0 < x_min - eps or x0 > x_max + eps:
+            continue
+
+        intersections = []
+        for (x1, y1), (x2, y2) in edges:
+            if abs(x2 - x1) < eps:
+                if abs(x0 - x1) < eps:
+                    intersections.extend([float(min(y1, y2)), float(max(y1, y2))])
+                continue
+
+            if x0 < min(x1, x2) - eps or x0 > max(x1, x2) + eps:
+                continue
+
+            t = (x0 - x1) / (x2 - x1)
+            if t < -eps or t > 1.0 + eps:
+                continue
+
+            y = y1 + t * (y2 - y1)
+            intersections.append(float(y))
+
+        if len(intersections) < 2:
+            continue
+
+        intersections.sort()
+        dedup = []
+        for y in intersections:
+            if not dedup or abs(y - dedup[-1]) > eps:
+                dedup.append(y)
+
+        for i in range(0, len(dedup) - 1, 2):
+            span = dedup[i + 1] - dedup[i]
+            if span > max_span:
+                max_span = span
+
+    return float(max_span)
 
 def _largest_inscribed_quadrilateral(diff_cnt: np.ndarray, diff_mask: np.ndarray) -> Optional[np.ndarray]:
         """Cherche le quadrilatère de plus grande aire contenu dans ``diff_cnt``."""
