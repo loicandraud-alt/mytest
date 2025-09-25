@@ -32,6 +32,7 @@ function resetResults() {
   while (resultsContainer.firstChild) {
     resultsContainer.removeChild(resultsContainer.firstChild);
   }
+  closeLightbox();
 }
 
 function revokeCurrentImageURL() {
@@ -116,15 +117,26 @@ async function drawFile(imageElement, dilation, mode) {
 
   const original = image.clone();
 
+  const dilatedOverlay = original.clone();
+  const edgeMask = new cv.Mat();
+  cv.threshold(edges, edgeMask, 0, 255, cv.THRESH_BINARY);
+
+  const accentColor = new cv.Mat(edges.rows, edges.cols, cv.CV_8UC3, new cv.Scalar(30, 180, 255, 255));
+  accentColor.copyTo(dilatedOverlay, edgeMask);
+  accentColor.delete();
+
   const edgesColor = new cv.Mat();
-  cv.cvtColor(edges, edgesColor, cv.COLOR_GRAY2BGR);
+  cv.cvtColor(edgeMask, edgesColor, cv.COLOR_GRAY2BGR);
+
+  edgeMask.delete();
 
   edges.delete();
   image.delete();
 
   const results = [
     { label: 'Image originale', mat: original },
-    { label: 'Contours dilatés', mat: edgesColor },
+    { label: 'Contours dilatés', mat: dilatedOverlay },
+    { label: 'Masque des contours', mat: edgesColor },
     { label: 'Remplissage texturé', mat: overlays.texturedImage },
     { label: 'Quadrilatères et bords', mat: overlays.backgroundWithQuads },
     { label: 'Points caractéristiques', mat: overlays.pointsOverlay },
@@ -1691,11 +1703,109 @@ function displayResults(results) {
     const canvas = document.createElement('canvas');
     canvas.width = mat.cols;
     canvas.height = mat.rows;
+    canvas.tabIndex = 0;
+    canvas.setAttribute('role', 'button');
+    canvas.setAttribute('aria-label', `Agrandir « ${label} »`);
     cv.imshow(canvas, mat);
+    canvas.addEventListener('click', () => {
+      lastFocusedCanvas = canvas;
+      openLightbox(canvas, label);
+    });
+    canvas.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        lastFocusedCanvas = canvas;
+        openLightbox(canvas, label);
+      }
+    });
     item.appendChild(canvas);
 
     resultsContainer.appendChild(item);
 
     mat.delete();
   });
+}
+
+function openLightbox(canvas, label) {
+  try {
+    const dataUrl = canvas.toDataURL('image/png');
+    lightboxImage.src = dataUrl;
+  } catch (error) {
+    console.error("Impossible de générer l'aperçu agrandi.", error);
+    return;
+  }
+
+  lightboxImage.alt = label;
+  lightboxCaption.textContent = label;
+  lightboxOverlay.removeAttribute('hidden');
+  lightboxOverlay.focus();
+}
+
+function closeLightbox() {
+  if (lightboxOverlay.hasAttribute('hidden')) {
+    return;
+  }
+
+  lightboxOverlay.setAttribute('hidden', '');
+  lightboxImage.removeAttribute('src');
+  lightboxImage.alt = '';
+  lightboxCaption.textContent = '';
+
+  if (lastFocusedCanvas) {
+    if (document.contains(lastFocusedCanvas)) {
+      lastFocusedCanvas.focus();
+    }
+    lastFocusedCanvas = null;
+  }
+}
+
+function createLightbox() {
+  const overlay = document.createElement('div');
+  overlay.id = 'result-lightbox';
+  overlay.setAttribute('hidden', '');
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.tabIndex = -1;
+
+  const content = document.createElement('div');
+  content.className = 'result-lightbox__content';
+
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'result-lightbox__close';
+  closeButton.setAttribute('aria-label', "Fermer l'aperçu");
+  closeButton.textContent = '×';
+
+  const image = document.createElement('img');
+  image.className = 'result-lightbox__image';
+  image.alt = '';
+
+  const caption = document.createElement('p');
+  caption.className = 'result-lightbox__caption';
+  caption.textContent = '';
+
+  content.appendChild(closeButton);
+  content.appendChild(image);
+  content.appendChild(caption);
+  overlay.appendChild(content);
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      closeLightbox();
+    }
+  });
+
+  closeButton.addEventListener('click', () => {
+    closeLightbox();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !overlay.hasAttribute('hidden')) {
+      event.preventDefault();
+      closeLightbox();
+    }
+  });
+
+  return { overlay, image, caption };
 }
