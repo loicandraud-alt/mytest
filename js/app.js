@@ -465,7 +465,7 @@ function processContours(image, contours, textures) {
     cv.bitwise_not(mask, invMask);
 
     const roiBg = new cv.Mat();
-    cv.bitwise_and(roi, roiBg, invMask);
+    cv.bitwise_and(roi, roi, roiBg, invMask);
 
     const combined = new cv.Mat();
     cv.add(roiBg, texturedRegion, combined);
