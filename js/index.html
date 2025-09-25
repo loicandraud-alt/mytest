@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyse de façade avec OpenCV.js</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap">
+    <style>
+        :root {
+            color-scheme: light dark;
+            font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        body {
+            margin: 0;
+            padding: 2rem clamp(1rem, 5vw, 3rem);
+            background: radial-gradient(circle at top left, rgba(96, 165, 250, 0.15), transparent 55%),
+                       radial-gradient(circle at bottom right, rgba(248, 113, 113, 0.15), transparent 50%),
+                       var(--background, #f7fafc);
+            color: #0f172a;
+            min-height: 100vh;
+        }
+        h1 {
+            font-size: clamp(2rem, 4vw, 3rem);
+            margin-bottom: 0.5rem;
+        }
+        p.description {
+            max-width: 60ch;
+            margin-bottom: 1.5rem;
+        }
+        .panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 20px 45px -25px rgba(15, 23, 42, 0.6);
+            margin-bottom: 2rem;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+        }
+        label {
+            font-weight: 600;
+            display: block;
+            margin-bottom: 0.25rem;
+        }
+        input[type="file"] {
+            display: block;
+            padding: 0.35rem 0.5rem;
+        }
+        button {
+            font-weight: 600;
+            border: none;
+            border-radius: 999px;
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(135deg, #2563eb, #9333ea);
+            color: white;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+        }
+        button[disabled] {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+        button:not([disabled]):hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 24px -12px rgba(37, 99, 235, 0.9);
+        }
+        #status {
+            margin-top: 0.5rem;
+            min-height: 1.25rem;
+            font-size: 0.95rem;
+            color: #1d4ed8;
+        }
+        #preview-container {
+            display: grid;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        #preview-container img {
+            max-width: min(100%, 480px);
+            border-radius: 12px;
+            box-shadow: 0 10px 28px -18px rgba(15, 23, 42, 0.8);
+        }
+        #results {
+            display: grid;
+            gap: 1.5rem;
+        }
+        .result-item {
+            display: grid;
+            gap: 0.5rem;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 14px;
+            padding: 1rem;
+            box-shadow: 0 12px 32px -24px rgba(15, 23, 42, 0.65);
+        }
+        .result-item canvas {
+            width: min(100%, 640px);
+            height: auto;
+            border-radius: 10px;
+        }
+        .result-item h3 {
+            margin: 0;
+            font-size: 1.1rem;
+        }
+        @media (min-width: 900px) {
+            #results {
+                grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Pipeline "drawFile" en JavaScript</h1>
+        <p class="description">
+            Uploadez une image de façade, puis lancez l'analyse. Toute la logique issue du script
+            Python a été recréée en JavaScript à l'aide d'OpenCV.js pour générer les différentes
+            visualisations intermédiaires (contours, zones colorées, remplissage texturé, etc.).
+        </p>
+    </header>
+
+    <section class="panel">
+        <div class="controls">
+            <div>
+                <label for="image-input">Image à analyser</label>
+                <input id="image-input" type="file" accept="image/*">
+            </div>
+            <div>
+                <label for="dilation-input">Dilataion des contours (px)</label>
+                <input id="dilation-input" type="number" min="1" max="15" value="4" step="1">
+            </div>
+            <button id="run-button" type="button" disabled>Exécuter drawFile</button>
+        </div>
+        <div id="status"></div>
+    </section>
+
+    <section id="preview-container" class="panel" hidden>
+        <div>
+            <label>Aperçu de l'image</label>
+            <img id="preview-image" alt="Aperçu de l'image téléchargée">
+        </div>
+    </section>
+
+    <section>
+        <h2>Images générées</h2>
+        <div id="results"></div>
+    </section>
+
+    <script src="https://docs.opencv.org/4.x/opencv.js" defer></script>
+    <script src="app.js" defer></script>
+</body>
+</html>
