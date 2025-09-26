@@ -318,9 +318,14 @@ def process_contours(image, contours, textures):
 
 def build_color_zones(image_shape, contours):
     color_zones = np.zeros((image_shape[0], image_shape[1], 3), dtype=np.uint8)
+    dilation_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     for contour_index, cnt in enumerate(contours):
         random_color = tuple(np.random.randint(0, 256, size=3).tolist())
-        cv2.drawContours(color_zones, [cnt], -1, random_color, thickness=cv2.FILLED)
+
+        contour_mask = np.zeros(image_shape[:2], dtype=np.uint8)
+        cv2.drawContours(contour_mask, [cnt], -1, 255, thickness=cv2.FILLED)
+        dilated_mask = cv2.dilate(contour_mask, dilation_kernel, iterations=1)
+        color_zones[dilated_mask > 0] = random_color
 
         moments = cv2.moments(cnt)
         if moments["m00"] != 0:
@@ -385,19 +390,19 @@ paths = [
 
     #'building10.jpg',
     #'building9.jpg'
-    #"'building7.jpg',
+    'building7.jpg',
     #'building5.jpg',
     #'building4.jpg',
     #'building2.jpg']
-    'weber1.png',
-    'weber2.png',
-'weber3.png',
-'weber4.png',
-'weber5.png',
-'weber6.png',
-'weber7.png',
-'weber8.png',
-'weber10.png',
+    #'weber1.png',
+    #'weber2.png',
+#'weber3.png',
+#'weber4.png',
+#'weber5.png',
+#'weber6.png',
+#'weber7.png',
+#'weber8.png',
+#'weber10.png',
     ]
 #paths = ['building5.jpg']
 for path in paths:
