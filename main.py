@@ -384,11 +384,20 @@ paths = [
     #'building11.jpg',
 
     #'building10.jpg',
-    'building9.jpg'
+    #'building9.jpg'
     #"'building7.jpg',
     #'building5.jpg',
     #'building4.jpg',
     #'building2.jpg']
+    'weber1.png',
+    'weber2.png',
+'weber3.png',
+'weber4.png',
+'weber5.png',
+'weber6.png',
+'weber7.png',
+'weber8.png',
+'weber10.png',
     ]
 #paths = ['building5.jpg']
 for path in paths:
